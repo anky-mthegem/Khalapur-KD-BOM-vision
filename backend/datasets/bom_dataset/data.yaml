@@ -1,0 +1,20 @@
+names:
+  0: HOM196273
+  1: HOM196276
+  2: HOM196277
+  3: HOM196280
+  4: HOM196281
+  5: HOM196328
+  6: HOM196329
+  7: HOM196330
+  8: HOM196331
+  9: HRD104875
+  10: HRD104880
+  11: HRD104885
+  12: HOM196279
+  13: HOM196306
+  14: NO_DWG_M4_SLEEVE_CONNECTING_SCREW_MAKE_EBCO_CNS35_S
+  15: NO_DWG_CARTON_470L_140W_55H
+path: C:/Users/anky_/Downloads/Github/Khalapur KD BOM vision/backend/datasets/bom_dataset
+train: images/train
+val: images/train
