@@ -25,6 +25,7 @@ class TrainingService:
             if cls._instance is None:
                 cls._instance = super(TrainingService, cls).__new__(cls)
                 cls._instance.is_training = False
+                cls._instance.logs = []
                 cls._instance.current_status: Dict[str, Any] = {
                     "status": "IDLE",
                     "run_name": None,
@@ -34,18 +35,30 @@ class TrainingService:
                     "map50": 0.0,
                     "map50_95": 0.0,
                     "active_weights": "yolo26s-obb.pt",
-                    "last_error": None
+                    "last_error": None,
+                    "logs": []
                 }
             return cls._instance
 
+    def log(self, msg: str):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        entry = f"[{timestamp}] {msg}"
+        print(f"[TrainingService] {entry}")
+        self.logs.append(entry)
+        if len(self.logs) > 200:
+            self.logs = self.logs[-200:]
+        self.current_status["logs"] = list(self.logs)
+
     def generate_data_yaml(self) -> Path:
         """
-        Dynamically generates data.yaml mapped directly to parts_catalog contiguous class IDs.
+        Dynamically generates data.yaml mapped directly to parts_catalog contiguous class IDs,
+        using item_name from the plant BOM as the class label.
         """
         yaml_path = DATASETS_DIR / "data.yaml"
         with SyncSessionLocal() as db:
             parts = db.query(PartsCatalog).order_by(PartsCatalog.yolo_class_id).all()
-            names_dict = {p.yolo_class_id: p.part_uid for p in parts}
+            # Use item_name as the class label per manufacturing requirement
+            names_dict = {p.yolo_class_id: p.item_name for p in parts}
 
         content = {
             "path": str(DATASETS_DIR.resolve()).replace("\\", "/"),
@@ -97,9 +110,14 @@ class TrainingService:
             return {"status": "STARTED", "run_name": run_name, "message": f"Training job '{run_name}' started."}
 
     def _run_training_worker(self, base_model: str, epochs: int, imgsz: int, device: str, run_name: str):
-        yaml_path = self.generate_data_yaml()
-        db_run_id = None
+        self.logs.clear()
+        self.log(f"Initializing YOLO26-OBB training job: '{run_name}'")
+        self.log(f"Base model: {base_model} | Epochs: {epochs} | Imgsz: {imgsz} | Device: {device}")
 
+        yaml_path = self.generate_data_yaml()
+        self.log(f"Generated dataset specification: {yaml_path.name}")
+        
+        db_run_id = None
         with SyncSessionLocal() as db:
             run_rec = TrainingRun(
                 run_name=run_name,
@@ -117,16 +135,23 @@ class TrainingService:
             # Check if dataset has training images
             train_img_dir = DATASETS_DIR / "images" / "train"
             img_files = list(train_img_dir.glob("*.jpg")) + list(train_img_dir.glob("*.png"))
+            self.log(f"Detected {len(img_files)} component training image(s) in training folder.")
 
             if len(img_files) == 0:
-                # Simulated training step when no physical images have been labeled yet
-                print(f"[TrainingService] No labeled images found in {train_img_dir}. Running simulated epoch cycle.")
+                self.log("No physical images found in training folder yet. Running simulated fast training cycle...")
                 for epoch in range(1, epochs + 1):
-                    time.sleep(0.1)  # fast simulation
+                    time.sleep(0.08)  # fast simulation
+                    loss = max(0.05, 1.8 - (epoch * 0.03))
+                    map50 = min(0.99, 0.40 + (epoch * 0.012))
+                    map50_95 = min(0.95, 0.30 + (epoch * 0.011))
+                    
                     self.current_status["current_epoch"] = epoch
-                    self.current_status["loss"] = max(0.05, 1.8 - (epoch * 0.03))
-                    self.current_status["map50"] = min(0.99, 0.40 + (epoch * 0.012))
-                    self.current_status["map50_95"] = min(0.95, 0.30 + (epoch * 0.011))
+                    self.current_status["loss"] = loss
+                    self.current_status["map50"] = map50
+                    self.current_status["map50_95"] = map50_95
+                    
+                    if epoch == 1 or epoch % 5 == 0 or epoch == epochs:
+                        self.log(f"Epoch [{epoch:02d}/{epochs:02d}] -> Loss: {loss:.4f} | mAP50: {map50:.1%} | mAP50-95: {map50_95:.1%}")
 
                 # Save mock weights
                 mock_weights_path = WEIGHTS_DIR / f"{run_name}.pt"
@@ -134,22 +159,29 @@ class TrainingService:
                     f.write(b"MOCK_YOLO26_OBB_WEIGHTS_BINARY_BLOB")
                 target_weights = mock_weights_path
             else:
+                self.log("Loading Ultralytics YOLO26 architecture with native end-to-end inference (nms=False)...")
                 from ultralytics import YOLO
                 model = YOLO(base_model)
                 
-                # Setup custom callbacks for epoch progress
                 def on_train_epoch_end(trainer):
                     epoch = trainer.epoch + 1
                     self.current_status["current_epoch"] = epoch
-                    # Extract loss & metrics
                     metrics = trainer.metrics or {}
-                    self.current_status["loss"] = float(trainer.loss_items.sum()) if hasattr(trainer, "loss_items") else 0.1
-                    self.current_status["map50"] = float(metrics.get("metrics/mAP50(B)", 0.0))
-                    self.current_status["map50_95"] = float(metrics.get("metrics/mAP50-95(B)", 0.0))
+                    loss_val = float(trainer.loss_items.sum()) if hasattr(trainer, "loss_items") else 0.1
+                    m50 = float(metrics.get("metrics/mAP50(B)", 0.0))
+                    m50_95 = float(metrics.get("metrics/mAP50-95(B)", 0.0))
+                    
+                    self.current_status["loss"] = loss_val
+                    self.current_status["map50"] = m50
+                    self.current_status["map50_95"] = m50_95
+                    
+                    if epoch == 1 or epoch % 5 == 0 or epoch == epochs:
+                        self.log(f"Epoch [{epoch:02d}/{epochs:02d}] -> Loss: {loss_val:.4f} | mAP50: {m50:.1%}")
 
                 model.add_callback("on_train_epoch_end", on_train_epoch_end)
 
                 dev_arg = 0 if device == "0" else ("cpu" if device == "cpu" else None)
+                self.log("Executing model.train() in background...")
                 results = model.train(
                     data=str(yaml_path),
                     epochs=epochs,
@@ -178,10 +210,17 @@ class TrainingService:
                 db.commit()
 
             self.current_status["status"] = "COMPLETED"
-            print(f"[TrainingService] Training completed successfully. Weights saved at {target_weights}")
+            self.log(f"Training completed successfully! Saved weights to: {target_weights.name}")
+            
+            # Automatically hot-swap trained weights into live vision engine
+            try:
+                self.activate_model(str(target_weights))
+                self.log(f"Model '{target_weights.name}' automatically activated for live conveyor inspection.")
+            except Exception as e:
+                self.log(f"Note on model activation: {e}")
 
         except Exception as e:
-            print(f"[TrainingService] Training failed: {e}")
+            self.log(f"TRAINING FAILED with error: {e}")
             self.current_status["status"] = "FAILED"
             self.current_status["last_error"] = str(e)
             with SyncSessionLocal() as db:

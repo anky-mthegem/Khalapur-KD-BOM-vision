@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, X, Check, FileSpreadsheet, AlertTriangle, EyeOff, Save } from 'lucide-react';
+import { Upload, X, Check, FileSpreadsheet, AlertTriangle, EyeOff, Save, Download, Clipboard } from 'lucide-react';
 import { api } from '../../services/api';
 import { BomPreviewResponse } from '../../types/bom';
 
@@ -14,7 +14,9 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
   onClose,
   onRecipeCommitted
 }) => {
+  const [activeTab, setActiveTab] = useState<'upload' | 'paste'>('upload');
   const [file, setFile] = useState<File | null>(null);
+  const [pastedText, setPastedText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [preview, setPreview] = useState<BomPreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +37,23 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
       } finally {
         setIsLoading(false);
       }
+    }
+  };
+
+  const handleParsePasted = async () => {
+    if (!pastedText.trim()) {
+      setError("Please paste BOM table data from Excel before parsing.");
+      return;
+    }
+    setError(null);
+    setIsLoading(true);
+    try {
+      const previewData = await api.parsePastedBom(pastedText);
+      setPreview(previewData);
+    } catch (err: any) {
+      setError(err.message || 'Failed to parse pasted BOM data. Ensure rows include Sr No, Item Name, and Qty.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -65,43 +84,118 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 select-none">
-      <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-300">
+      <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-gray-300">
         {/* Header */}
         <div className="bg-[#107C41] text-white p-3 px-4 flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <FileSpreadsheet className="w-5 h-5" />
-            <span className="font-bold text-sm">Import Manufacturing BOM Excel Spreadsheet</span>
+            <FileSpreadsheet className="w-5 h-5 text-yellow-300" />
+            <span className="font-bold text-sm">Create Manufacturing BOM Recipe from Standard Excel</span>
           </div>
           <button onClick={onClose} className="text-white/80 hover:text-white">
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* Template Helper Bar */}
+        <div className="bg-green-50 border-b border-green-200 px-4 py-2.5 flex items-center justify-between">
+          <div className="text-xs text-green-900">
+            <strong>Standard Plant Format:</strong> Ensure BOM contains <em>Item Code(Master)</em>, <em>Description</em>, and line columns (<em>Sr No</em>, <em>Item Name</em>, <em>Drawing No</em>, <em>Qty</em>).
+          </div>
+          <a
+            href="/api/bom/download-template"
+            download="Standard_Plant_BOM_Template.xlsx"
+            className="flex items-center space-x-1.5 bg-[#107C41] hover:bg-[#0E6032] text-white px-3 py-1 rounded text-xs font-semibold shadow-sm transition"
+            title="Download standard Excel template with sample master kit"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Download Template (.xlsx)</span>
+          </a>
+        </div>
+
+        {/* Mode Selector Tabs */}
+        <div className="flex border-b border-gray-200 bg-gray-50 px-4 pt-2 space-x-2">
+          <button
+            onClick={() => setActiveTab('upload')}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-t border-t border-x transition ${
+              activeTab === 'upload'
+                ? 'bg-white border-gray-300 text-[#107C41] border-b-white -mb-px'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center space-x-1.5">
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload Standard Excel File</span>
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('paste')}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-t border-t border-x transition ${
+              activeTab === 'paste'
+                ? 'bg-white border-gray-300 text-[#107C41] border-b-white -mb-px'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center space-x-1.5">
+              <Clipboard className="w-3.5 h-3.5" />
+              <span>Copy-Paste BOM Table from Excel</span>
+            </span>
+          </button>
+        </div>
+
         {/* Body */}
         <div className="p-4 flex-1 overflow-y-auto space-y-4 text-xs">
-          {/* File Selector */}
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50/50 transition">
-            <input
-              type="file"
-              id="excel-upload-input"
-              accept=".xlsx,.xls,.csv"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            <label htmlFor="excel-upload-input" className="cursor-pointer flex flex-col items-center">
-              <Upload className="w-8 h-8 text-[#107C41] mb-2" />
-              <span className="font-bold text-gray-800 text-sm">
-                {file ? file.name : "Click to select or drag & drop Plant BOM Excel/CSV file"}
-              </span>
-              <span className="text-[11px] text-gray-500 mt-1">
-                Supports Standard Plant BOM format (.csv, .xlsx, .xls with auto-detection of Master Code, Drawings, and Packaging)
-              </span>
-            </label>
-          </div>
+          {activeTab === 'upload' ? (
+            /* File Selector */
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50/50 transition">
+              <input
+                type="file"
+                id="excel-upload-input"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <label htmlFor="excel-upload-input" className="cursor-pointer flex flex-col items-center">
+                <Upload className="w-8 h-8 text-[#107C41] mb-2" />
+                <span className="font-bold text-gray-800 text-sm">
+                  {file ? file.name : "Click to select or drag & drop Standard Plant BOM (.xlsx / .csv)"}
+                </span>
+                <span className="text-[11px] text-gray-500 mt-1">
+                  Supports multi-sheet workbooks with merged headers and auto-slugging of drawing numbers
+                </span>
+              </label>
+            </div>
+          ) : (
+            /* Paste Text Area */
+            <div className="space-y-2">
+              <label className="font-semibold text-gray-700 block">
+                Paste tabular data directly from Microsoft Excel (Ctrl+V):
+              </label>
+              <textarea
+                value={pastedText}
+                onChange={(e) => setPastedText(e.target.value)}
+                placeholder={"Item Code(Master)\t31162814SD05076\nDescription\tHRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3\nSr No\tItem Name\tDrawing No\tQty\n1\tM4X10 SCREW CHEESE HEAD\tHOM196273\t8\n2\tM4 SLEEVE CONNECTING SCREW\t—\t2\n..."}
+                rows={6}
+                className="w-full p-2.5 border border-gray-300 rounded font-mono text-[11px] bg-gray-50 focus:bg-white focus:outline-none focus:border-[#107C41]"
+              />
+              <div className="flex justify-between items-center pt-1">
+                <span className="text-[11px] text-gray-500">
+                  Tip: Copy rows directly from Excel. Tab-separated cells will be automatically converted to BOM items.
+                </span>
+                <button
+                  onClick={handleParsePasted}
+                  disabled={isLoading}
+                  className="px-4 py-1.5 bg-[#107C41] hover:bg-[#0E6032] text-white rounded font-bold text-xs flex items-center space-x-1.5 shadow"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Parse Pasted BOM</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {isLoading && (
-            <div className="text-center py-4 text-[#107C41] font-semibold animate-pulse">
-              Parsing workbook, extracting merged headers, and slugging drawing numbers...
+            <div className="text-center py-3 text-[#107C41] font-semibold animate-pulse">
+              Processing BOM layout, verifying drawing numbers, and flagging packaging items...
             </div>
           )}
 
@@ -121,26 +215,26 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
                   <strong className="font-mono text-[#2B579A] text-sm">{preview.master_item_code}</strong>
                 </div>
                 <div>
-                  <span className="text-gray-500">Sheet:</span> <strong>{preview.sheet_name}</strong>
+                  <span className="text-gray-500">Source:</span> <strong>{preview.sheet_name}</strong>
                 </div>
                 <div className="col-span-2">
                   <span className="text-gray-500">Description:</span> <strong>{preview.description}</strong>
                 </div>
                 <div>
-                  <span className="text-gray-500">Total Items:</span> <strong>{preview.total_items}</strong> (Vision: {preview.vision_items_count})
+                  <span className="text-gray-500">Total Items:</span> <strong>{preview.total_items}</strong> (Vision Inspected: {preview.vision_items_count})
                 </div>
                 <div>
-                  <span className="text-gray-500">Auto-Excluded Packaging:</span> <strong className="text-gray-600">{preview.excluded_packaging_count}</strong>
+                  <span className="text-gray-500">Auto-Excluded Packaging (Carton):</span> <strong className="text-gray-600">{preview.excluded_packaging_count}</strong>
                 </div>
               </div>
 
               {/* Table Preview */}
-              <div className="border border-gray-300 rounded overflow-hidden max-h-64 overflow-y-auto">
+              <div className="border border-gray-300 rounded overflow-hidden max-h-56 overflow-y-auto">
                 <table className="excel-grid-table">
                   <thead className="sticky top-0 bg-[#F3F2F1]">
                     <tr>
                       <th className="w-8 text-center">#</th>
-                      <th>Item Name</th>
+                      <th>Item Name (Acts as YOLO Label)</th>
                       <th>Drawing No</th>
                       <th>Canonical Part UID</th>
                       <th className="w-10 text-center">Qty</th>
@@ -152,7 +246,7 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
                     {preview.items.map((it) => (
                       <tr key={it.sr_no} className={it.is_vision_inspected ? "bg-white" : "bg-gray-100 text-gray-500 italic"}>
                         <td className="text-center font-mono">{it.sr_no}</td>
-                        <td className="truncate max-w-xs">{it.item_name}</td>
+                        <td className="truncate max-w-xs font-medium">{it.item_name}</td>
                         <td className="font-mono text-[11px]">{it.drawing_no}</td>
                         <td className="font-mono text-[11px] text-blue-700">{it.part_uid}</td>
                         <td className="text-center font-bold font-mono">{it.target_qty}</td>

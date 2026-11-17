@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BomRecipe, PartCatalogItem } from '../../types/bom';
 import { api } from '../../services/api';
-import { Play, FileSpreadsheet, Layers, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Play, FileSpreadsheet, Layers, RefreshCw, CheckCircle2, AlertCircle, Download } from 'lucide-react';
 
 interface BomRecipesTabProps {
   onLoadRecipe: (masterCode: string) => void;
@@ -56,14 +56,26 @@ export const BomRecipesTab: React.FC<BomRecipesTabProps> = ({
           </button>
         </div>
 
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="flex items-center space-x-1 px-2.5 py-1 bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          <a
+            href="/api/bom/download-template"
+            download="Standard_Plant_BOM_Template.xlsx"
+            className="flex items-center space-x-1.5 px-3 py-1 bg-[#107C41] hover:bg-[#0E6032] text-white rounded font-semibold transition shadow-sm"
+            title="Download plant standard Excel BOM template"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Download Standard Template (.xlsx)</span>
+          </a>
+
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center space-x-1 px-2.5 py-1 bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Content Area */}

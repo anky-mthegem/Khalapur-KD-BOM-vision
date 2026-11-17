@@ -82,41 +82,58 @@ class AutoLabelerService:
 
         cv2.imwrite(str(img_path), image)
 
-        # Lookup class IDs from DB
+        # Lookup class IDs from DB by part_uid or item_name
         with SyncSessionLocal() as db:
             parts = db.query(PartsCatalog).all()
             part_map = {p.part_uid: p.yolo_class_id for p in parts}
+            name_map = {p.item_name: p.yolo_class_id for p in parts}
 
             lines = []
             labeled_parts_set = set()
             for ann in annotations:
                 part_uid = ann.get("part_uid")
-                if not part_uid or part_uid not in part_map:
+                item_name = ann.get("item_name") or ann.get("label")
+                
+                class_id = None
+                matched_key = None
+                if item_name and item_name in name_map:
+                    class_id = name_map[item_name]
+                    matched_key = item_name
+                elif part_uid and part_uid in part_map:
+                    class_id = part_map[part_uid]
+                    matched_key = part_uid
+                
+                if class_id is None:
                     continue
-                class_id = part_map[part_uid]
-                poly = ann["polygon"]  # 4 points [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
-                coords_flat = [f"{pt[0]:.6f} {pt[1]:.6f}" for pt in poly]
+
+                poly = ann.get("polygon")
+                if not poly or len(poly) < 4:
+                    poly = [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]]
+                
+                coords_flat = [f"{pt[0]:.6f} {pt[1]:.6f}" for pt in poly[:4]]
                 line = f"{class_id} " + " ".join(coords_flat)
                 lines.append(line)
-                labeled_parts_set.add(part_uid)
+                labeled_parts_set.add(matched_key)
 
             # Write label txt
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
 
             # Update sample counts in database
-            for p_uid in labeled_parts_set:
-                part = db.query(PartsCatalog).filter_by(part_uid=p_uid).first()
+            for p_key in labeled_parts_set:
+                part = db.query(PartsCatalog).filter(
+                    (PartsCatalog.part_uid == p_key) | (PartsCatalog.item_name == p_key)
+                ).first()
                 if part:
                     part.sample_count += 1
-                    if part.sample_count >= 10 and part.training_status == "UNTRAINED":
+                    if part.sample_count >= 1 and part.training_status == "UNTRAINED":
                         part.training_status = "LABELED"
             
             # Record labeled frame
             frame_rec = LabeledFrame(
                 image_path=f"datasets/bom_dataset/images/train/{img_filename}",
                 label_path=f"datasets/bom_dataset/labels/train/{txt_filename}",
-                source="CAMERA_CAPTURE",
+                source="CAMERA_CAPTURE" if not annotations or not annotations[0].get("is_browse_upload") else "BROWSE_UPLOAD",
                 master_item_code=master_item_code,
                 annotated_boxes_count=len(lines),
                 is_verified=True
@@ -128,7 +145,79 @@ class AutoLabelerService:
             "image_path": str(img_path),
             "label_path": str(txt_path),
             "boxes_saved": len(lines),
-            "file_id": file_id
+            "file_id": file_id,
+            "filename": img_filename
+        }
+
+    @staticmethod
+    def get_dataset_summary() -> Dict[str, Any]:
+        """
+        Returns the list and count of all images in the training folder,
+        along with sample counts per item_name.
+        """
+        train_img_dir = DATASETS_DIR / "images" / "train"
+        train_lbl_dir = DATASETS_DIR / "labels" / "train"
+        train_img_dir.mkdir(parents=True, exist_ok=True)
+        train_lbl_dir.mkdir(parents=True, exist_ok=True)
+
+        img_files = sorted(
+            list(train_img_dir.glob("*.jpg")) + list(train_img_dir.glob("*.png")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+
+        with SyncSessionLocal() as db:
+            parts = db.query(PartsCatalog).order_by(PartsCatalog.yolo_class_id).all()
+            id_to_name = {p.yolo_class_id: p.item_name for p in parts}
+            part_counts = {p.item_name: 0 for p in parts}
+
+            samples = []
+            for img in img_files[:50]:  # latest 50
+                lbl_path = train_lbl_dir / f"{img.stem}.txt"
+                assigned_names = []
+                if lbl_path.exists():
+                    with open(lbl_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            parts_tokens = line.strip().split()
+                            if parts_tokens:
+                                try:
+                                    cid = int(parts_tokens[0])
+                                    cname = id_to_name.get(cid, f"Class {cid}")
+                                    assigned_names.append(cname)
+                                    if cname in part_counts:
+                                        part_counts[cname] += 1
+                                except ValueError:
+                                    pass
+
+                samples.append({
+                    "filename": img.name,
+                    "stem": img.stem,
+                    "labels": assigned_names if assigned_names else ["Unassigned"],
+                    "primary_label": assigned_names[0] if assigned_names else "Unassigned",
+                    "timestamp": datetime.fromtimestamp(img.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+            # Calculate total overall counts
+            for p in parts:
+                if p.item_name in part_counts:
+                    p.sample_count = max(p.sample_count, part_counts[p.item_name])
+
+            parts_summary = [
+                {
+                    "item_name": p.item_name,
+                    "drawing_no": p.drawing_no or "—",
+                    "yolo_class_id": p.yolo_class_id,
+                    "sample_count": part_counts.get(p.item_name, p.sample_count),
+                    "training_status": p.training_status
+                }
+                for p in parts
+            ]
+            db.commit()
+
+        return {
+            "total_images": len(img_files),
+            "samples": samples,
+            "parts_summary": parts_summary
         }
 
 auto_labeler = AutoLabelerService()

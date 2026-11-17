@@ -19,6 +19,7 @@ class TrainingStatusResponse(BaseModel):
     map50_95: float = 0.0
     active_weights: str
     last_error: Optional[str] = None
+    logs: Optional[list[str]] = []
 
 class ModelActivateRequest(BaseModel):
     weights_path_or_name: str

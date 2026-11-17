@@ -3,13 +3,15 @@ Labeling Studio Routes:
 Capture conveyor frames, run OpenCV adaptive contour proposals, and save verified YOLO-OBB labels.
 """
 import cv2
+import base64
 import numpy as np
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from backend.app.config import DATASETS_DIR
 from backend.app.database import get_db
 from backend.app.models.dataset import LabeledFrame
 from backend.app.services.camera_service import camera_service
@@ -26,6 +28,105 @@ class ContourProposalRequest(BaseModel):
 class SaveAnnotationsRequest(BaseModel):
     annotations: List[Dict[str, Any]]
     master_item_code: Optional[str] = None
+
+class SaveComponentRequest(BaseModel):
+    image_base64: str
+    item_name: str
+    drawing_no: Optional[str] = None
+    polygon: Optional[List[List[float]]] = None
+    master_item_code: Optional[str] = None
+
+@router.post("/upload-image")
+async def upload_image_file(file: UploadFile = File(...)):
+    """
+    Accepts an uploaded component image (from user's Browse button),
+    decodes it, runs auto-contour proposals, and returns base64 and proposals.
+    """
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(status_code=400, detail="Invalid image file or format.")
+
+    proposals = auto_labeler.auto_segment_contours(image)
+
+    ret, buffer = cv2.imencode(".jpg", image)
+    b64_img = base64.b64encode(buffer).decode("utf-8")
+
+    return {
+        "filename": file.filename,
+        "image_base64": f"data:image/jpeg;base64,{b64_img}",
+        "width": image.shape[1],
+        "height": image.shape[0],
+        "proposals": proposals
+    }
+
+@router.post("/save-component")
+async def save_component(payload: SaveComponentRequest):
+    """
+    Saves an annotated component image directly into the YOLO training folder,
+    using the item_name from the plant BOM as the class label.
+    """
+    # Extract raw base64 data
+    b64_data = payload.image_base64
+    if "," in b64_data:
+        b64_data = b64_data.split(",", 1)[1]
+
+    try:
+        img_bytes = base64.b64decode(b64_data)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError("Decoded image is empty.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to decode base64 image: {e}")
+
+    annotation = {
+        "item_name": payload.item_name,
+        "part_uid": payload.drawing_no if payload.drawing_no and payload.drawing_no != "—" else payload.item_name,
+        "polygon": payload.polygon or [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]],
+        "is_browse_upload": True
+    }
+
+    result = auto_labeler.save_labeled_frame(
+        image=image,
+        annotations=[annotation],
+        master_item_code=payload.master_item_code
+    )
+
+    return {
+        "status": "SAVED",
+        "item_name": payload.item_name,
+        "result": result
+    }
+
+@router.get("/dataset-summary")
+async def get_dataset_summary():
+    """
+    Retrieves the complete breakdown of images stored in the training folder
+    and sample counts per BOM item_name.
+    """
+    return auto_labeler.get_dataset_summary()
+
+@router.delete("/sample/{stem}")
+async def delete_dataset_sample(stem: str):
+    """
+    Deletes a sample image and label from the training folder.
+    """
+    img_path_jpg = DATASETS_DIR / "images" / "train" / f"{stem}.jpg"
+    img_path_png = DATASETS_DIR / "images" / "train" / f"{stem}.png"
+    lbl_path = DATASETS_DIR / "labels" / "train" / f"{stem}.txt"
+
+    deleted = False
+    for p in [img_path_jpg, img_path_png, lbl_path]:
+        if p.exists():
+            p.unlink()
+            deleted = True
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Sample '{stem}' not found.")
+
+    return {"status": "DELETED", "stem": stem}
 
 @router.post("/capture-frame")
 async def capture_current_frame():

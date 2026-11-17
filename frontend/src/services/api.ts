@@ -25,6 +25,16 @@ export const api = {
     return res.json();
   },
 
+  async parsePastedBom(rawText: string): Promise<BomPreviewResponse> {
+    const res = await fetch(`${API_BASE}/bom/parse-pasted`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw_text: rawText }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   async commitBom(payload: { master_item_code: string; description: string; items: any[] }) {
     const res = await fetch(`${API_BASE}/bom/commit`, {
       method: 'POST',
@@ -162,6 +172,47 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ annotations, master_item_code: masterItemCode }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async uploadComponentImage(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/labeling/upload-image`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async saveComponent(payload: {
+    image_base64: string;
+    item_name: string;
+    drawing_no?: string;
+    polygon?: number[][];
+    master_item_code?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE}/labeling/save-component`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getDatasetSummary(): Promise<any> {
+    const res = await fetch(`${API_BASE}/labeling/dataset-summary`);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async deleteSample(stem: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/labeling/sample/${encodeURIComponent(stem)}`, {
+      method: 'DELETE',
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();

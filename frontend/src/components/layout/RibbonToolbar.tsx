@@ -30,7 +30,6 @@ interface RibbonToolbarProps {
   onToggleTripwireMode: () => void;
   isTripwireEditMode: boolean;
   onCompleteBatch: () => void;
-  onSimulateCross: () => void;
   onOpenUploadModal: () => void;
   // Labeling actions
   onCaptureFrame?: () => void;
@@ -46,7 +45,6 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
   onToggleTripwireMode,
   isTripwireEditMode,
   onCompleteBatch,
-  onSimulateCross,
   onOpenUploadModal,
   onCaptureFrame,
   onAutoAnnotate,
@@ -172,17 +170,6 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
             </button>
 
             <div className="ribbon-divider" />
-
-            {/* Windows 11 Offline Dev Tools */}
-            <button
-              onClick={onSimulateCross}
-              className="ribbon-btn-large bg-yellow-50/80 border-yellow-300 hover:bg-yellow-100"
-              title="Simulate a fastener rolling across the virtual tripwire (Offline Dev Mode)"
-            >
-              <ArrowRightLeft className="w-5 h-5 text-yellow-700 mb-0.5" />
-              <span className="font-semibold text-gray-800">Simulate Cross</span>
-              <span className="text-[9px] text-yellow-800">Win11 Test</span>
-            </button>
 
             <button
               onClick={onOpenUploadModal}

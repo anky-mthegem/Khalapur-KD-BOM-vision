@@ -243,19 +243,11 @@ class PlantExcelBomParser:
         }
 
     @classmethod
-    def parse_csv(cls, file_path: Path) -> Dict[str, Any]:
+    def parse_rows(cls, rows: List[List[str]], source_name: str = "BOM") -> Dict[str, Any]:
         """
-        Parses CSV plant BOM layout:
-        Row 1: ,Item Code(Master),31162814SD05076,
-        Row 2: ,Description,HRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3 (HRD199065),
-        Row 3: Sr No,Item Name,Drawing No,Qty
+        Parses a 2D grid of string cells (from CSV or pasted Excel text).
+        Extracts master code, description, headers, and line items.
         """
-        rows: List[List[str]] = []
-        with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
-            reader = csv.reader(f)
-            for row in reader:
-                rows.append([cell.strip() for cell in row])
-
         master_item_code = ""
         description = ""
         header_row_idx = -1
@@ -286,7 +278,7 @@ class PlantExcelBomParser:
                     break
 
         if not master_item_code:
-            master_item_code = file_path.stem
+            master_item_code = "MANUAL_BOM"
 
         if not description:
             description = f"Plant BOM for {master_item_code}"
@@ -314,7 +306,7 @@ class PlantExcelBomParser:
                         qty_col = c_idx
 
             matched_count = sum(1 for col in [sr_col, name_col, dwg_col, qty_col] if col != -1)
-            if matched_count >= 3:
+            if matched_count >= 2:
                 header_row_idx = r_idx
                 col_indices = {
                     "sr": sr_col if sr_col != -1 else 0,
@@ -386,8 +378,45 @@ class PlantExcelBomParser:
         return {
             "master_item_code": master_item_code,
             "description": description,
-            "sheet_name": file_path.name,
+            "sheet_name": source_name,
             "total_items": total_items,
             "vision_items_count": vision_count,
             "items": items
         }
+
+    @classmethod
+    def parse_csv(cls, file_path: Path) -> Dict[str, Any]:
+        """
+        Parses CSV plant BOM layout:
+        Row 1: ,Item Code(Master),31162814SD05076,
+        Row 2: ,Description,HRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3 (HRD199065),
+        Row 3: Sr No,Item Name,Drawing No,Qty
+        """
+        rows: List[List[str]] = []
+        with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                rows.append([cell.strip() for cell in row])
+
+        return cls.parse_rows(rows, source_name=file_path.name)
+
+    @classmethod
+    def parse_raw_text(cls, text: str, source_name: str = "Pasted Excel BOM") -> Dict[str, Any]:
+        """
+        Parses raw text copied from Excel (tab-delimited or comma-delimited).
+        """
+        import io
+        lines = [l for l in text.strip().splitlines() if l.strip()]
+        if not lines:
+            raise ValueError("No text provided to parse.")
+        
+        # Check if tab-delimited (standard clipboard from Excel) or comma-delimited
+        first_few = "\n".join(lines[:5])
+        delimiter = "\t" if "\t" in first_few else ","
+        
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+        rows: List[List[str]] = []
+        for row in reader:
+            rows.append([cell.strip() for cell in row])
+            
+        return cls.parse_rows(rows, source_name=source_name)

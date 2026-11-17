@@ -124,3 +124,20 @@ Sr No,Item Name,Drawing No,Qty
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
+
+def test_pasted_bom_parser():
+    pasted_text = (
+        "Item Code(Master)\t31162814SD05076\n"
+        "Description\tHRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3\n"
+        "Sr No\tItem Name\tDrawing No\tQty\n"
+        "1\tWOOD SCREW CSK 3.5X15\tHOM196273\t8\n"
+        "2\tM4 SLEEVE CONNECTING SCREW MAKE EBCO - CNS35-S\t—\t4\n"
+        "3\tCARTON (470L X 140W X 55H)\t—\t1\n"
+    )
+    parsed = PlantExcelBomParser.parse_raw_text(pasted_text)
+    assert parsed["master_item_code"] == "31162814SD05076"
+    assert parsed["total_items"] == 3
+    assert parsed["vision_items_count"] == 2
+    assert parsed["items"][1]["drawing_no"] == "—"
+    assert parsed["items"][1]["part_uid"].startswith("NO_DWG_")
+    assert parsed["items"][2]["is_vision_inspected"] is False

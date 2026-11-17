@@ -239,9 +239,9 @@
 
       <!-- Section 5: Standard Plant BOM Format -->
       <section id="sec-bom-standard" class="sop-section" data-roles="quality">
-        <h2>5. Standard Plant BOM Format (CSV & Excel)</h2>
+        <h2>5. Standard Plant BOM Format & Recipe Ingestion</h2>
         <p>
-          All manufacturing plant BOMs must strictly comply with the standard layout defined below. The system automatically ingests <code>.csv</code>, <code>.xlsx</code>, and <code>.xls</code> files.
+          All manufacturing plant BOMs must strictly comply with the standard layout defined below. Operators can either <strong>Download the Standard Template (.xlsx)</strong>, upload the completed workbook, or <strong>Copy-Paste BOM data directly from Excel</strong> into the application modal.
         </p>
 
         <h3>5.1 Master Reference Layout: Kit <code>31162814SD05076</code></h3>
@@ -406,18 +406,29 @@
 
       <!-- Section 6: Auto-Labeling Studio -->
       <section id="sec-labeling-sop" class="sop-section" data-roles="quality maintenance">
-        <h2>6. Auto-Labeling Studio SOP</h2>
-        <p>When introducing a new BOM with previously unseen parts:</p>
+        <h2>6. Component Image Annotation & YOLO26 Training SOP</h2>
+        <p>When introducing a new plant BOM recipe or adding new hardware components to the vision model:</p>
 
         <ol>
           <li>Navigate to the <strong>Dataset & Labeling</strong> ribbon tab.</li>
-          <li>Place 5 to 10 sample hardware pieces on the stationary conveyor belt.</li>
-          <li>Click <strong>"Capture Frame"</strong>. The high-resolution camera frame appears on the canvas.</li>
           <li>
-            Click <strong>"Re-Segment Contours"</strong>. OpenCV adaptive thresholding automatically extracts candidate Oriented Bounding Boxes (OBB).
+            Click <strong>"Browse Component Image"</strong> and select a high-resolution photo of the hardware item from your local computer (or click "Camera Capture" to grab from the live conveyor).
           </li>
-          <li>Click a box on the canvas and assign the corresponding Part Drawing Number from the dropdown.</li>
-          <li>Click <strong>"Save YOLO-OBB Labels"</strong>. The images and normalized 8-point polygon annotations are saved directly into <code>datasets/bom_dataset/</code>.</li>
+          <li>
+            In the right panel, select the <strong>Item Name</strong> from the plant BOM dropdown (e.g. <code>M4X10 SCREW CHEESE HEAD...</code>). This Item Name acts as the ground-truth YOLO26 class label.
+          </li>
+          <li>
+            (Optional) Click <strong>"Auto Fastener Box"</strong> to let OpenCV detect the fastener's contour and oriented bounding box.
+          </li>
+          <li>
+            Click <strong>"Add to Training Folder"</strong>. The image and normalized YOLO-OBB annotation are stored directly into <code>datasets/bom_dataset/images/train/</code> and <code>labels/train/</code>.
+          </li>
+          <li>
+            Repeat this process one by one for each component image until all required BOM line items have training images collected.
+          </li>
+          <li>
+            Click <strong>"Start YOLO26 Model Training"</strong>. The Ultralytics engine fine-tunes the model, displays live epoch progress and scrolling console logs, and automatically confirms and activates the new model weights upon completion!
+          </li>
         </ol>
       </section>
 

@@ -201,6 +201,31 @@ export const ModelTrainingTab: React.FC<ModelTrainingTabProps> = ({
                 </span>
               </div>
             </div>
+
+            {/* Real-Time Terminal Progress Logs */}
+            <div className="space-y-1 pt-1">
+              <span className="text-[11px] font-bold text-gray-700 uppercase tracking-wider block">
+                Ultralytics YOLO26 Training Progress Logs:
+              </span>
+              <div className="bg-gray-900 text-green-400 font-mono text-[11px] p-3 rounded h-36 overflow-y-auto border border-gray-700 space-y-0.5">
+                {(status.logs && status.logs.length > 0) ? (
+                  status.logs.map((logLine, idx) => (
+                    <div key={idx} className="whitespace-pre-wrap">{logLine}</div>
+                  ))
+                ) : (
+                  <div className="text-gray-500 italic">No active training logs. Ready to start.</div>
+                )}
+              </div>
+            </div>
+
+            {status.status === 'COMPLETED' && (
+              <div className="bg-green-50 border border-green-300 text-green-800 p-2.5 rounded text-xs flex items-center justify-between">
+                <span className="flex items-center space-x-1.5 font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-[#107C10]" />
+                  <span>Training completed successfully! Model weights '{status.active_weights}' are now active.</span>
+                </span>
+              </div>
+            )}
           </div>
         )}
 

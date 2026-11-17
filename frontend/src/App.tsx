@@ -142,17 +142,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSimulateCross = async () => {
-    // Pick the first incomplete item or first item
-    const targetItem = sessionState.items.find(
-      (it) => it.is_vision_inspected && it.counted_qty < it.target_qty
-    ) || sessionState.items[0];
-
-    if (targetItem) {
-      await api.simulateCrossing(targetItem.part_uid, targetItem.item_name);
-    }
-  };
-
   const handleToggleVision = async (srNo: number) => {
     // Optimistic toggle in local view
     setSessionState(prev => ({
@@ -180,7 +169,6 @@ export const App: React.FC = () => {
         onToggleTripwireMode={() => setIsTripwireEditMode(!isTripwireEditMode)}
         isTripwireEditMode={isTripwireEditMode}
         onCompleteBatch={handleCompleteBatch}
-        onSimulateCross={handleSimulateCross}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
       />
 

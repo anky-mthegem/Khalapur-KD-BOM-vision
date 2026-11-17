@@ -110,6 +110,29 @@ export interface TrainingStatus {
   map50_95: number;
   active_weights: string;
   last_error?: string;
+  logs?: string[];
+}
+
+export interface DatasetSample {
+  filename: string;
+  stem: string;
+  labels: string[];
+  primary_label: string;
+  timestamp: string;
+}
+
+export interface PartSummaryItem {
+  item_name: string;
+  drawing_no: string;
+  yolo_class_id: number;
+  sample_count: number;
+  training_status: string;
+}
+
+export interface DatasetSummary {
+  total_images: number;
+  samples: DatasetSample[];
+  parts_summary: PartSummaryItem[];
 }
 
 export interface ModelWeightFile {
