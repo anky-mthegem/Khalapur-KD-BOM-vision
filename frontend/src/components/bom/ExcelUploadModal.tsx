@@ -84,17 +84,17 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
             <input
               type="file"
               id="excel-upload-input"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv"
               onChange={handleFileChange}
               className="hidden"
             />
             <label htmlFor="excel-upload-input" className="cursor-pointer flex flex-col items-center">
               <Upload className="w-8 h-8 text-[#107C41] mb-2" />
               <span className="font-bold text-gray-800 text-sm">
-                {file ? file.name : "Click to select or drag & drop Plant BOM Excel file"}
+                {file ? file.name : "Click to select or drag & drop Plant BOM Excel/CSV file"}
               </span>
               <span className="text-[11px] text-gray-500 mt-1">
-                Supports Microsoft Excel .xlsx and .xls (Auto-detects merged headers, drawings, and packaging items)
+                Supports Standard Plant BOM format (.csv, .xlsx, .xls with auto-detection of Master Code, Drawings, and Packaging)
               </span>
             </label>
           </div>

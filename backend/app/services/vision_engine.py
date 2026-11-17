@@ -134,10 +134,14 @@ class VisionEngine:
             return cls._instance
 
     def load_classes_from_db(self):
-        with SyncSessionLocal() as db:
-            parts = db.query(PartsCatalog).all()
-            self.classes_map = {p.yolo_class_id: p.part_uid for p in parts}
-            self.names_map = {p.part_uid: p.item_name for p in parts}
+        try:
+            with SyncSessionLocal() as db:
+                parts = db.query(PartsCatalog).all()
+                self.classes_map = {p.yolo_class_id: p.part_uid for p in parts}
+                self.names_map = {p.part_uid: p.item_name for p in parts}
+        except Exception:
+            self.classes_map = {}
+            self.names_map = {}
 
     def init_model(self, model_name: str):
         self.load_classes_from_db()

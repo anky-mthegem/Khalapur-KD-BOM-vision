@@ -26,8 +26,9 @@ async def upload_bom_preview(file: UploadFile = File(...), db: AsyncSession = De
     Parses an uploaded plant Excel BOM (.xlsx or .xls), extracts metadata,
     and returns a preview without saving to the database.
     """
-    if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls")):
-        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are supported.")
+    valid_extensions = (".xlsx", ".xls", ".csv")
+    if not any(file.filename.lower().endswith(ext) for ext in valid_extensions):
+        raise HTTPException(status_code=400, detail="Only Excel (.xlsx, .xls) and CSV (.csv) files are supported.")
 
     suffix = Path(file.filename).suffix
     with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -35,7 +36,7 @@ async def upload_bom_preview(file: UploadFile = File(...), db: AsyncSession = De
         tmp_path = Path(tmp.name)
 
     try:
-        parsed_data = PlantExcelBomParser.parse_workbook(tmp_path)
+        parsed_data = PlantExcelBomParser.parse_file(tmp_path)
     finally:
         if tmp_path.exists():
             tmp_path.unlink()

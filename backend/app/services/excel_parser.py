@@ -1,10 +1,11 @@
 """
-Dedicated Plant BOM Excel Parser.
-Uses openpyxl to parse plant BOMs with merged cells, extract master metadata,
-enforce canonical part_uid slugging for items lacking drawing numbers,
-and automatically flag packaging materials as excluded from vision inspection.
+Dedicated Plant BOM Excel & CSV Parser.
+Parses manufacturing plant BOMs in .xlsx, .xls, and .csv formats.
+Handles merged cells, metadata headers, canonical part_uid slugging,
+and packaging material auto-exclusion.
 """
 import re
+import csv
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 import openpyxl
@@ -57,8 +58,15 @@ def get_merged_cell_value(sheet: Worksheet, row: int, col: int) -> Any:
 
 class PlantExcelBomParser:
     """
-    Parser for Plant Manufacturing BOM spreadsheets.
+    Parser for Plant Manufacturing BOM spreadsheets (.xlsx, .xls, .csv).
     """
+
+    @classmethod
+    def parse_file(cls, file_path: Path) -> Dict[str, Any]:
+        """Parses any supported BOM file (.xlsx, .xls, .csv)."""
+        if file_path.suffix.lower() == ".csv":
+            return cls.parse_csv(file_path)
+        return cls.parse_workbook(file_path)
 
     @classmethod
     def parse_workbook(cls, file_path: Path) -> Dict[str, Any]:
@@ -93,7 +101,6 @@ class PlantExcelBomParser:
 
                 # Look for Master Code
                 if "ITEM CODE" in val_str.upper() or "MASTER CODE" in val_str.upper():
-                    # Check next cells in same row or row below
                     for next_c in range(c + 1, min(c + 5, max_cols + 1)):
                         next_val = get_merged_cell_value(sheet, r, next_c)
                         if next_val and str(next_val).strip() and not ("ITEM CODE" in str(next_val).upper()):
@@ -115,7 +122,6 @@ class PlantExcelBomParser:
                     val = get_merged_cell_value(sheet, r, c)
                     if val:
                         s = str(val).strip()
-                        # Typical code pattern e.g. 31162814SD05076 (alphanumeric 12-18 chars)
                         if re.match(r'^\d{6,12}[A-Z0-9]{3,8}$', s):
                             master_item_code = s
                             break
@@ -163,7 +169,6 @@ class PlantExcelBomParser:
                 break
 
         if header_row_idx == -1:
-            # Fallback assumption: standard 4-column layout starting at row 3 or 4
             header_row_idx = 3
             col_indices = {"sr": 1, "name": 2, "dwg": 3, "qty": 4}
 
@@ -184,7 +189,6 @@ class PlantExcelBomParser:
                 continue
             consecutive_empty = 0
 
-            # Stop on total/summary row
             name_str = str(name_val or "").strip()
             if any(term in name_str.upper() for term in ["TOTAL", "GRAND TOTAL", "PREPARED BY", "APPROVED BY"]):
                 break
@@ -192,7 +196,6 @@ class PlantExcelBomParser:
             if not name_str:
                 continue
 
-            # Parse Sr No
             sr_no = len(items) + 1
             if sr_val is not None:
                 try:
@@ -200,7 +203,6 @@ class PlantExcelBomParser:
                 except (ValueError, TypeError):
                     pass
 
-            # Parse Qty
             target_qty = 1
             if qty_val is not None:
                 try:
@@ -208,7 +210,6 @@ class PlantExcelBomParser:
                 except (ValueError, TypeError):
                     target_qty = 1
 
-            # Determine Drawing No and canonical part_uid
             dwg_clean, is_valid_dwg = normalize_drawing_no(dwg_val)
             if is_valid_dwg and dwg_clean:
                 part_uid = dwg_clean
@@ -217,7 +218,6 @@ class PlantExcelBomParser:
                 part_uid = generate_part_uid_slug(name_str)
                 drawing_no = "—"
 
-            # Determine packaging exclusion
             is_packaging = is_packaging_item(name_str)
             is_vision_inspected = not is_packaging
 
@@ -237,6 +237,156 @@ class PlantExcelBomParser:
             "master_item_code": master_item_code,
             "description": description,
             "sheet_name": sheet.title,
+            "total_items": total_items,
+            "vision_items_count": vision_count,
+            "items": items
+        }
+
+    @classmethod
+    def parse_csv(cls, file_path: Path) -> Dict[str, Any]:
+        """
+        Parses CSV plant BOM layout:
+        Row 1: ,Item Code(Master),31162814SD05076,
+        Row 2: ,Description,HRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3 (HRD199065),
+        Row 3: Sr No,Item Name,Drawing No,Qty
+        """
+        rows: List[List[str]] = []
+        with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                rows.append([cell.strip() for cell in row])
+
+        master_item_code = ""
+        description = ""
+        header_row_idx = -1
+        col_indices = {"sr": 0, "name": 1, "dwg": 2, "qty": 3}
+
+        # Scan top 10 rows for Master Code and Description
+        for r_idx, row in enumerate(rows[:10]):
+            for c_idx, cell in enumerate(row):
+                cell_upper = cell.upper()
+                if "ITEM CODE" in cell_upper or "MASTER CODE" in cell_upper:
+                    for next_c in range(c_idx + 1, len(row)):
+                        if row[next_c] and not ("ITEM CODE" in row[next_c].upper()):
+                            master_item_code = row[next_c]
+                            break
+                elif "DESCRIPTION" in cell_upper and not description:
+                    for next_c in range(c_idx + 1, len(row)):
+                        if row[next_c] and len(row[next_c]) > 3:
+                            description = row[next_c]
+                            break
+
+        if not master_item_code:
+            for row in rows[:5]:
+                for cell in row:
+                    if re.match(r'^\d{6,12}[A-Z0-9]{3,8}$', cell):
+                        master_item_code = cell
+                        break
+                if master_item_code:
+                    break
+
+        if not master_item_code:
+            master_item_code = file_path.stem
+
+        if not description:
+            description = f"Plant BOM for {master_item_code}"
+
+        # Locate Header Row
+        for r_idx, row in enumerate(rows[:15]):
+            row_upper = [c.upper() for c in row]
+            sr_col = -1
+            name_col = -1
+            dwg_col = -1
+            qty_col = -1
+
+            for c_idx, text in enumerate(row_upper):
+                if any(k in text for k in ["SR NO", "SR. NO", "S.NO", "SL NO", "ITEM NO", "SR"]):
+                    if sr_col == -1:
+                        sr_col = c_idx
+                elif any(k in text for k in ["ITEM NAME", "DESCRIPTION", "PART NAME", "MATERIAL DESCRIPTION"]):
+                    if name_col == -1:
+                        name_col = c_idx
+                elif any(k in text for k in ["DRAWING NO", "DRG NO", "DRAWING NUMBER", "DRG. NO", "DWG NO"]):
+                    if dwg_col == -1:
+                        dwg_col = c_idx
+                elif any(k in text for k in ["QTY", "QUANTITY", "TARGET QTY", "BOM QTY", "REQ QTY"]):
+                    if qty_col == -1:
+                        qty_col = c_idx
+
+            matched_count = sum(1 for col in [sr_col, name_col, dwg_col, qty_col] if col != -1)
+            if matched_count >= 3:
+                header_row_idx = r_idx
+                col_indices = {
+                    "sr": sr_col if sr_col != -1 else 0,
+                    "name": name_col if name_col != -1 else 1,
+                    "dwg": dwg_col if dwg_col != -1 else 2,
+                    "qty": qty_col if qty_col != -1 else 3
+                }
+                break
+
+        if header_row_idx == -1:
+            header_row_idx = 2
+            col_indices = {"sr": 0, "name": 1, "dwg": 2, "qty": 3}
+
+        # Extract items
+        items: List[Dict[str, Any]] = []
+        for row in rows[header_row_idx + 1:]:
+            if not row or not any(row):
+                continue
+
+            while len(row) < 4:
+                row.append("")
+
+            sr_val = row[col_indices["sr"]] if col_indices["sr"] < len(row) else ""
+            name_val = row[col_indices["name"]] if col_indices["name"] < len(row) else ""
+            dwg_val = row[col_indices["dwg"]] if col_indices["dwg"] < len(row) else ""
+            qty_val = row[col_indices["qty"]] if col_indices["qty"] < len(row) else "1"
+
+            if not name_val:
+                continue
+
+            if any(term in name_val.upper() for term in ["TOTAL", "GRAND TOTAL", "PREPARED BY"]):
+                break
+
+            sr_no = len(items) + 1
+            try:
+                sr_no = int(float(sr_val))
+            except (ValueError, TypeError):
+                pass
+
+            target_qty = 1
+            try:
+                target_qty = int(float(qty_val))
+            except (ValueError, TypeError):
+                pass
+
+            dwg_clean, is_valid_dwg = normalize_drawing_no(dwg_val)
+            if is_valid_dwg and dwg_clean:
+                part_uid = dwg_clean
+                drawing_no = dwg_clean
+            else:
+                part_uid = generate_part_uid_slug(name_val)
+                drawing_no = "—"
+
+            is_packaging = is_packaging_item(name_val)
+            is_vision_inspected = not is_packaging
+
+            items.append({
+                "sr_no": sr_no,
+                "part_uid": part_uid,
+                "item_name": name_val,
+                "drawing_no": drawing_no,
+                "target_qty": target_qty,
+                "is_vision_inspected": is_vision_inspected
+            })
+
+        total_items = len(items)
+        vision_count = sum(1 for it in items if it["is_vision_inspected"])
+
+        return {
+            "master_item_code": master_item_code,
+            "description": description,
+            "sheet_name": file_path.name,
             "total_items": total_items,
             "vision_items_count": vision_count,
             "items": items
