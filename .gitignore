@@ -44,7 +44,12 @@ backend/data/*.db-journal
 # Audit snapshots & training weights (keep directories via .gitkeep)
 backend/static_audit/*.jpg
 backend/static_audit/*.png
+/*.pt
+*.cache
+backend/models/weights/train_*/
 backend/models/weights/*.pt
+!backend/models/weights/yolo26s-obb.pt
+!backend/models/weights/yolo26n-obb.pt
 !backend/models/weights/.gitkeep
 backend/datasets/bom_dataset/images/*/*.jpg
 backend/datasets/bom_dataset/labels/*/*.txt

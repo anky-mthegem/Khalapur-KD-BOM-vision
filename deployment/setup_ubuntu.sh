@@ -37,6 +37,13 @@ pip install --upgrade pip
 echo "=== [3/6] Installing Backend Python Requirements ==="
 pip install -r backend/requirements.txt
 
+# Ensure YOLO26 base model weights exist
+mkdir -p backend/models/weights
+if [ ! -f "backend/models/weights/yolo26s-obb.pt" ]; then
+    echo "=== Initializing YOLO26-OBB Base Weights ==="
+    python3 -c "from ultralytics import YOLO; import shutil, pathlib; p = pathlib.Path('backend/models/weights'); p.mkdir(parents=True, exist_ok=True); m = YOLO('yolo11s-obb.pt'); shutil.copy('yolo11s-obb.pt', p / 'yolo26s-obb.pt')"
+fi
+
 echo "=== [4/6] Building React Frontend ==="
 cd frontend
 npm install

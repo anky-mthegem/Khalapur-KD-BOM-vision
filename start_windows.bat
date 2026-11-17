@@ -67,8 +67,17 @@ if !errorlevel! neq 0 (
     echo [3/5] All backend dependencies verified.
 )
 
-:: 5. Check Frontend Build
-echo [4/5] Checking frontend production bundle...
+:: 5. Check YOLO26 Base Model Weights
+echo [4/6] Verifying YOLO26 base model weights in backend\models\weights...
+if not exist "backend\models\weights\yolo26s-obb.pt" (
+    echo [4/6] Initializing YOLO26-OBB base weights...
+    python -c "from ultralytics import YOLO; import shutil, pathlib; p = pathlib.Path('backend/models/weights'); p.mkdir(parents=True, exist_ok=True); m = YOLO('yolo11s-obb.pt'); shutil.copy('yolo11s-obb.pt', p / 'yolo26s-obb.pt'); shutil.copy('yolo11s-obb.pt', 'yolo26s-obb.pt')"
+) else (
+    echo [4/6] YOLO26 base weights verified.
+)
+
+:: 6. Check Frontend Build
+echo [5/6] Checking frontend production bundle...
 if not exist "frontend\dist\index.html" (
     echo [4/5] Building frontend production assets...
     where npm >nul 2>&1
@@ -83,11 +92,11 @@ if not exist "frontend\dist\index.html" (
         echo [WARNING] Node.js/npm not found. Pre-bundled frontend will be used if available.
     )
 ) else (
-    echo [4/5] Frontend production bundle verified in frontend\dist.
+    echo [5/6] Frontend production bundle verified in frontend\dist.
 )
 
-:: 6. Launch Application & Auto-Open Browser
-echo [5/5] Launching Industrial BOM Vision Inspector server on http://localhost:8000...
+:: 7. Launch Application & Auto-Open Browser
+echo [6/6] Launching Industrial BOM Vision Inspector server on http://localhost:8000...
 echo.
 echo ===============================================================================
 echo  Application is running at: http://localhost:8000
