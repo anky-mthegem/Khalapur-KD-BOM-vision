@@ -13,7 +13,11 @@ import {
   AlertTriangle,
   RefreshCw,
   Zap,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Crosshair,
+  Maximize2,
+  RotateCcw,
+  Square
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { PartCatalogItem, DatasetSummary, TrainingStatus, BomRecipe } from '../../types/bom';
@@ -43,6 +47,11 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
   const [proposals, setProposals] = useState<ProposalBox[]>([]);
   const [selectedItemName, setSelectedItemName] = useState<string>('');
   const [selectedDrawingNo, setSelectedDrawingNo] = useState<string>('');
+
+  // Interactive Click & Drag Drawing State
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [dragStart, setDragStart] = useState<{ nx: number; ny: number } | null>(null);
+  const [draftPolygon, setDraftPolygon] = useState<number[][] | null>(null);
 
   // Data & Dataset state
   const [parts, setParts] = useState<PartCatalogItem[]>([]);
@@ -94,7 +103,6 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
 
   useEffect(() => {
     loadData();
-    // Poll training status every 2 seconds
     const interval = setInterval(async () => {
       try {
         const st = await api.getTrainingStatus();
@@ -109,7 +117,6 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     return () => clearInterval(interval);
   }, [activeMasterCode]);
 
-  // Auto-scroll terminal logs to bottom
   useEffect(() => {
     if (logsContainerRef.current) {
       logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
@@ -128,22 +135,21 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
         const res = await api.uploadComponentImage(file);
         setImageBase64(res.image_base64);
 
-        // If backend returned contour proposals, use them; otherwise create default center box
+        // If backend returned contour proposals, use them; otherwise create default centered box
         let boxes = res.proposals || [];
         if (boxes.length === 0) {
           boxes = [{
             id: 'box_default',
-            polygon: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+            polygon: [[0.15, 0.15], [0.85, 0.15], [0.85, 0.85], [0.15, 0.85]],
             center: [0.5, 0.5],
-            width: 0.8,
-            height: 0.8,
+            width: 0.7,
+            height: 0.7,
             angle: 0,
-            area: 0.64,
+            area: 0.49,
             part_uid: selectedDrawingNo || selectedItemName,
             item_name: selectedItemName
           }];
         } else {
-          // Tag boxes with currently selected item name
           boxes = boxes.map((b: any) => ({
             ...b,
             item_name: selectedItemName,
@@ -196,7 +202,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // 4. Re-run OpenCV Contour Detection
+  // 4. One-Click Box Utilities
   const handleAutoContours = async () => {
     if (!imageBase64) return;
     setIsProcessing(true);
@@ -209,6 +215,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
       }));
       setProposals(boxes);
       drawCanvas(boxes);
+      setNotification({ type: 'success', message: `OpenCV auto-detected ${boxes.length} box(es).` });
     } catch (e: any) {
       setNotification({ type: 'error', message: 'Auto-contour failed: ' + e.message });
     } finally {
@@ -216,8 +223,107 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // 5. Draw Canvas with Oriented Bounding Box and Item Name Tag
-  const drawCanvas = (boxes: ProposalBox[]) => {
+  const handleSetFullImageBox = () => {
+    if (!imageBase64) return;
+    const fullBox: ProposalBox = {
+      id: `box_full_${Date.now()}`,
+      polygon: [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]],
+      center: [0.5, 0.5],
+      width: 0.9,
+      height: 0.9,
+      angle: 0,
+      area: 0.81,
+      part_uid: selectedDrawingNo || selectedItemName,
+      item_name: selectedItemName
+    };
+    setProposals([fullBox]);
+    drawCanvas([fullBox]);
+    setNotification({ type: 'success', message: 'Box set to cover the component frame.' });
+  };
+
+  const handleClearBox = () => {
+    setProposals([]);
+    drawCanvas([]);
+    setNotification({ type: 'success', message: 'Box cleared. Click and drag on the image to draw a new box.' });
+  };
+
+  // 5. Interactive Mouse Coordinates Helper
+  const getNormalizedCoordinates = (e: React.MouseEvent<HTMLCanvasElement>): { nx: number; ny: number } => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { nx: 0, ny: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const nx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    return { nx, ny };
+  };
+
+  // 6. Interactive Click & Drag Handlers
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!imageBase64) return;
+    e.preventDefault();
+    const { nx, ny } = getNormalizedCoordinates(e);
+    setIsDrawing(true);
+    setDragStart({ nx, ny });
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !dragStart || !canvasRef.current || !imageObjRef.current) return;
+    const { nx, ny } = getNormalizedCoordinates(e);
+
+    const x1 = Math.min(dragStart.nx, nx);
+    const y1 = Math.min(dragStart.ny, ny);
+    const x2 = Math.max(dragStart.nx, nx);
+    const y2 = Math.max(dragStart.ny, ny);
+
+    const draftPoly = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+    setDraftPolygon(draftPoly);
+
+    // Live redraw with active draft box
+    drawCanvas(proposals, draftPoly);
+  };
+
+  const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !dragStart) return;
+    const { nx, ny } = getNormalizedCoordinates(e);
+
+    const x1 = Math.min(dragStart.nx, nx);
+    const y1 = Math.min(dragStart.ny, ny);
+    const x2 = Math.max(dragStart.nx, nx);
+    const y2 = Math.max(dragStart.ny, ny);
+
+    const width = x2 - x1;
+    const height = y2 - y1;
+
+    // Minimum size threshold (2% of image dimension) to prevent accidental clicks
+    if (width > 0.02 && height > 0.02) {
+      const newBox: ProposalBox = {
+        id: `box_user_${Date.now()}`,
+        polygon: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+        center: [(x1 + x2) / 2, (y1 + y2) / 2],
+        width,
+        height,
+        angle: 0,
+        area: width * height,
+        part_uid: selectedDrawingNo || selectedItemName,
+        item_name: selectedItemName
+      };
+
+      const updated = [newBox];
+      setProposals(updated);
+      drawCanvas(updated, null);
+      setNotification({
+        type: 'success',
+        message: `Created box (${Math.round(width * 100)}% × ${Math.round(height * 100)}%). Ready to add to training folder.`
+      });
+    }
+
+    setIsDrawing(false);
+    setDragStart(null);
+    setDraftPolygon(null);
+  };
+
+  // 7. Draw Canvas with High-Contrast Bounding Box, Corner Handles & Label Banner
+  const drawCanvas = (boxes: ProposalBox[], activeDraft: number[][] | null = null) => {
     const canvas = canvasRef.current;
     if (!canvas || !imageObjRef.current) return;
     const ctx = canvas.getContext('2d');
@@ -226,17 +332,17 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     canvas.width = imageObjRef.current.width;
     canvas.height = imageObjRef.current.height;
 
-    // Draw base image
+    // 1. Draw base photo
     ctx.drawImage(imageObjRef.current, 0, 0);
 
-    // Draw OBB boxes
+    // 2. Draw confirmed boxes
     boxes.forEach((b) => {
-      ctx.beginPath();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#107C10';
-
       const pts = b.polygon.map(([nx, ny]) => [nx * canvas.width, ny * canvas.height]);
       if (pts.length >= 4) {
+        ctx.beginPath();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#107C10'; // Plant Green
+
         ctx.moveTo(pts[0][0], pts[0][1]);
         for (let i = 1; i < pts.length; i++) {
           ctx.lineTo(pts[i][0], pts[i][1]);
@@ -244,32 +350,79 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
         ctx.closePath();
         ctx.stroke();
 
-        // Translucent fill
-        ctx.fillStyle = 'rgba(16, 124, 16, 0.15)';
+        // Translucent highlight fill
+        ctx.fillStyle = 'rgba(16, 124, 16, 0.18)';
         ctx.fill();
 
-        // Draw label banner
-        const cx = b.center ? b.center[0] * canvas.width : pts[0][0];
-        const cy = b.center ? b.center[1] * canvas.height : pts[0][1];
-        const labelText = selectedItemName ? selectedItemName.slice(0, 32) : 'LABEL REQUIRED';
+        // Corner grab handle circles
+        pts.forEach(([px, py]) => {
+          ctx.beginPath();
+          ctx.arc(px, py, 5, 0, Math.PI * 2);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#107C10';
+          ctx.stroke();
+        });
+
+        // Top label badge
+        const cx = Math.min(...pts.map((p) => p[0]));
+        const cy = Math.min(...pts.map((p) => p[1]));
+        const labelText = selectedItemName ? selectedItemName.slice(0, 36) : 'SELECT ITEM NAME (LABEL)';
 
         ctx.fillStyle = '#107C10';
-        ctx.fillRect(Math.max(10, cx - 70), Math.max(20, cy - 14), 220, 22);
+        ctx.fillRect(Math.max(10, cx), Math.max(18, cy - 22), 240, 22);
         ctx.fillStyle = '#FFFFFF';
         ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(labelText, Math.max(14, cx - 66), Math.max(34, cy + 1));
+        ctx.fillText(labelText, Math.max(14, cx + 4), Math.max(34, cy - 7));
       }
     });
+
+    // 3. Draw live click-and-drag draft box (if currently dragging)
+    if (activeDraft && activeDraft.length >= 4) {
+      const draftPts = activeDraft.map(([nx, ny]) => [nx * canvas.width, ny * canvas.height]);
+      ctx.beginPath();
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 4]); // Dashed line while drawing
+      ctx.strokeStyle = '#00E5FF'; // Vibrant Cyan for live drag
+
+      ctx.moveTo(draftPts[0][0], draftPts[0][1]);
+      for (let i = 1; i < draftPts.length; i++) {
+        ctx.lineTo(draftPts[i][0], draftPts[i][1]);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]); // Reset dash
+
+      ctx.fillStyle = 'rgba(0, 229, 255, 0.15)';
+      ctx.fill();
+
+      // Dimension guide badge
+      const dw = Math.abs(draftPts[1][0] - draftPts[0][0]);
+      const dh = Math.abs(draftPts[2][1] - draftPts[1][1]);
+      const minX = Math.min(...draftPts.map((p) => p[0]));
+      const minY = Math.min(...draftPts.map((p) => p[1]));
+
+      ctx.fillStyle = '#004B50';
+      ctx.fillRect(minX, Math.max(10, minY - 18), 120, 18);
+      ctx.fillStyle = '#00E5FF';
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText(`${Math.round(dw)} × ${Math.round(dh)} px`, minX + 6, Math.max(24, minY - 5));
+    }
   };
 
-  // 6. Save Component Image & Label to Training Folder
+  // 8. Save Component Image & Label to Training Folder
   const handleSaveToTraining = async () => {
     if (!imageBase64) {
       setNotification({ type: 'error', message: 'Please browse or capture a component image first.' });
       return;
     }
     if (!selectedItemName) {
-      setNotification({ type: 'error', message: 'Please select an Item Name from the BOM to act as the label.' });
+      setNotification({ type: 'error', message: 'Please select an Item Name from the BOM dropdown on the right.' });
+      return;
+    }
+    if (proposals.length === 0) {
+      setNotification({ type: 'error', message: 'Please create a box around the object first (click & drag on image, or click "Auto Box").' });
       return;
     }
 
@@ -277,9 +430,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     setNotification(null);
 
     try {
-      const activePolygon = proposals.length > 0
-        ? proposals[0].polygon
-        : [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]];
+      const activePolygon = proposals[0].polygon;
 
       await api.saveComponent({
         image_base64: imageBase64,
@@ -308,7 +459,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // 7. Delete sample from training folder
+  // 9. Delete sample from training folder
   const handleDeleteSample = async (stem: string) => {
     try {
       await api.deleteSample(stem);
@@ -320,7 +471,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // 8. Trigger YOLO26 Model Training
+  // 10. Trigger YOLO26 Model Training
   const handleStartTraining = async () => {
     setIsStartingTraining(true);
     setShowTrainingPanel(true);
@@ -341,7 +492,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // Available label items (from active recipe if loaded, else parts catalog)
+  // Available label items
   const availableItems = activeRecipe
     ? activeRecipe.items.filter((it) => it.is_vision_inspected)
     : parts.map((p, idx) => ({
@@ -392,25 +543,68 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
             <span>Camera Capture</span>
           </button>
 
-          {/* Auto Fastener Contours */}
-          <button
-            onClick={handleAutoContours}
-            disabled={!imageBase64 || isProcessing || isTraining}
-            className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded font-semibold flex items-center space-x-1.5 disabled:opacity-50"
-            title="Run OpenCV adaptive contour detection on this image"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>Auto Fastener Box</span>
-          </button>
+          <div className="ribbon-divider" />
+
+          {/* BOX CREATION TOOLS */}
+          <div className="flex items-center space-x-1 bg-gray-100 p-0.5 rounded border border-gray-300">
+            {/* Draw Box / Click & Drag Tool */}
+            <button
+              onClick={() => {
+                setNotification({
+                  type: 'success',
+                  message: 'Draw Box Active: Click and drag with your mouse directly on the image to outline the component.'
+                });
+              }}
+              className="px-3 py-1 bg-white hover:bg-cyan-50 border border-cyan-400 text-cyan-900 rounded font-bold flex items-center space-x-1 shadow-sm"
+              title="Click and drag with mouse on the image to draw a bounding box around any hardware piece"
+            >
+              <Crosshair className="w-3.5 h-3.5 text-cyan-700" />
+              <span>Click & Drag Box</span>
+            </button>
+
+            {/* Auto Fastener Contours (OpenCV) */}
+            <button
+              onClick={handleAutoContours}
+              disabled={!imageBase64 || isProcessing || isTraining}
+              className="px-2.5 py-1 text-gray-700 hover:text-purple-800 hover:bg-purple-50 rounded font-semibold flex items-center space-x-1 disabled:opacity-40"
+              title="Use OpenCV adaptive contour detection to automatically find the fastener's oriented bounding box"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+              <span>Auto Box</span>
+            </button>
+
+            {/* Full Image Box */}
+            <button
+              onClick={handleSetFullImageBox}
+              disabled={!imageBase64 || isProcessing || isTraining}
+              className="px-2.5 py-1 text-gray-700 hover:text-blue-800 hover:bg-blue-50 rounded font-semibold flex items-center space-x-1 disabled:opacity-40"
+              title="Fit bounding box around the whole component frame"
+            >
+              <Maximize2 className="w-3.5 h-3.5 text-blue-600" />
+              <span>Full Box</span>
+            </button>
+
+            {/* Clear Box */}
+            <button
+              onClick={handleClearBox}
+              disabled={!imageBase64 || proposals.length === 0 || isProcessing || isTraining}
+              className="px-2 py-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded font-semibold disabled:opacity-40"
+              title="Remove existing box so you can redraw a new one"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="ribbon-divider" />
 
           {/* Save & Add to Training Folder */}
           <button
             onClick={handleSaveToTraining}
-            disabled={!imageBase64 || isProcessing || isTraining}
+            disabled={!imageBase64 || proposals.length === 0 || isProcessing || isTraining}
             className="px-4 py-1.5 bg-[#107C10] hover:bg-[#0E6A0E] text-white rounded font-bold flex items-center space-x-1.5 shadow disabled:opacity-50"
             title="Store labeled image and annotation txt in training folder"
           >
-            <Save className="w-4 h-4" />
+            <Save className="w-4 h-4 text-white" />
             <span>Add to Training Folder</span>
           </button>
 
@@ -456,13 +650,35 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
         {/* Left (60%): Interactive Component Annotation Canvas */}
         <div className="flex-1 bg-black flex flex-col items-center justify-center p-3 relative overflow-hidden">
           {imageBase64 ? (
-            <div className="relative max-h-full max-w-full flex items-center justify-center overflow-auto">
+            <div className="relative max-h-full max-w-full flex flex-col items-center justify-center overflow-auto">
+              {/* Interactive Helper Prompt Banner */}
+              <div className="absolute top-3 left-4 right-4 z-20 flex justify-between items-center pointer-events-none">
+                <div className="bg-[#107C41]/95 text-white px-3 py-1 rounded shadow-md border border-green-400 text-xs flex items-center space-x-2">
+                  <Crosshair className="w-4 h-4 text-yellow-300" />
+                  <span className="font-bold">
+                    Box Creator Active: Click and drag with mouse to draw a box around the object.
+                  </span>
+                </div>
+                {proposals.length > 0 && (
+                  <div className="bg-black/80 text-green-400 px-2.5 py-1 rounded text-[11px] font-mono border border-green-600">
+                    Box: {Math.round(proposals[0].width * 100)}% × {Math.round(proposals[0].height * 100)}%
+                  </div>
+                )}
+              </div>
+
+              {/* Canvas with Mouse Drag Event Handlers */}
               <canvas
                 ref={canvasRef}
-                className="max-h-full max-w-full object-contain border border-gray-600 rounded shadow"
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp}
+                onMouseLeave={handleCanvasMouseUp}
+                className="max-h-full max-w-full object-contain border-2 border-gray-600 rounded shadow cursor-crosshair"
               />
+
+              {/* Bottom Image Info Badge */}
               <div className="absolute bottom-2 left-2 bg-black/80 text-white px-2.5 py-1 rounded text-[11px] font-mono border border-gray-600">
-                Image: {currentFilename} | Assigned Label: <span className="text-yellow-300 font-bold">{selectedItemName || "NONE"}</span>
+                Image: {currentFilename} | Assigned Label: <span className="text-yellow-300 font-bold">{selectedItemName || "NONE (SELECT ON RIGHT)"}</span>
               </div>
             </div>
           ) : (
