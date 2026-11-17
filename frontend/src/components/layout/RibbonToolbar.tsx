@@ -15,7 +15,8 @@ import {
   Sparkles,
   Camera,
   Layers,
-  ArrowRightLeft
+  ArrowRightLeft,
+  HelpCircle
 } from 'lucide-react';
 
 export type RibbonTab = 'home' | 'recipes' | 'labeling' | 'training' | 'audit';
@@ -64,37 +65,50 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
   return (
     <div className="bg-[#F3F2F1] border-b border-[#D2D0CE] shadow-sm select-none">
       {/* 1. Ribbon Tabs Header */}
-      <div className="flex border-b border-[#D2D0CE] bg-[#EDEBE9] px-2 text-xs">
-        <button
-          onClick={() => onSelectTab('home')}
-          className={`ribbon-tab ${activeTab === 'home' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
+      <div className="flex items-center justify-between border-b border-[#D2D0CE] bg-[#EDEBE9] px-2 text-xs">
+        <div className="flex">
+          <button
+            onClick={() => onSelectTab('home')}
+            className={`ribbon-tab ${activeTab === 'home' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
+          >
+            Home / Inspection
+          </button>
+          <button
+            onClick={() => onSelectTab('recipes')}
+            className={`ribbon-tab ${activeTab === 'recipes' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
+          >
+            BOM Recipes
+          </button>
+          <button
+            onClick={() => onSelectTab('labeling')}
+            className={`ribbon-tab ${activeTab === 'labeling' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
+          >
+            Dataset & Labeling
+          </button>
+          <button
+            onClick={() => onSelectTab('training')}
+            className={`ribbon-tab ${activeTab === 'training' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
+          >
+            Model Training
+          </button>
+          <button
+            onClick={() => onSelectTab('audit')}
+            className={`ribbon-tab ${activeTab === 'audit' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
+          >
+            Audit Logs
+          </button>
+        </div>
+
+        <a
+          href="/manual"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center space-x-1.5 text-[#2B579A] hover:text-[#107C10] hover:bg-white px-2.5 py-1 rounded border border-transparent hover:border-gray-300 font-semibold transition-colors"
+          title="Open Standard Operating Procedure (SOP) & User Manual"
         >
-          Home / Inspection
-        </button>
-        <button
-          onClick={() => onSelectTab('recipes')}
-          className={`ribbon-tab ${activeTab === 'recipes' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
-        >
-          BOM Recipes
-        </button>
-        <button
-          onClick={() => onSelectTab('labeling')}
-          className={`ribbon-tab ${activeTab === 'labeling' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
-        >
-          Dataset & Labeling
-        </button>
-        <button
-          onClick={() => onSelectTab('training')}
-          className={`ribbon-tab ${activeTab === 'training' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
-        >
-          Model Training
-        </button>
-        <button
-          onClick={() => onSelectTab('audit')}
-          className={`ribbon-tab ${activeTab === 'audit' ? 'ribbon-tab-active' : 'ribbon-tab-inactive'}`}
-        >
-          Audit Logs
-        </button>
+          <HelpCircle className="w-3.5 h-3.5 text-[#2B579A]" />
+          <span>Help & SOP Manual</span>
+        </a>
       </div>
 
       {/* 2. Ribbon Action Body */}

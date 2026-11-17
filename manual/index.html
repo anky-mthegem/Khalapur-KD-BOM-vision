@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SOP-KD-BOM-001: Conveyor Belt BOM Vision Inspector Standard Operating Procedure</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Top Document Header -->
+  <header class="sop-header">
+    <div class="sop-title-group">
+      <h1>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 3h18v18H3zM9 9h6v6H9z"/>
+        </svg>
+        STANDARD OPERATING PROCEDURE & TECHNICAL MANUAL
+      </h1>
+      <div class="sop-subtitle">
+        Conveyor Belt BOM Verification, Auto-Labeling & YOLO26 Training System | Khalapur Plant Line 1
+      </div>
+    </div>
+    <div class="sop-meta-pills">
+      <div class="sop-pill">DOC: <strong>SOP-KD-BOM-001</strong></div>
+      <div class="sop-pill">REV: <strong>2.6.0-OBB</strong></div>
+      <div class="sop-pill">STATUS: <strong>RELEASED (ACTIVE)</strong></div>
+      <div class="sop-pill">GATE: <strong>100% MATCH MANDATORY</strong></div>
+    </div>
+  </header>
+
+  <div class="sop-container">
+
+    <!-- Sidebar Navigation -->
+    <aside class="sop-sidebar">
+      <div class="search-box">
+        <input type="text" id="sopSearch" placeholder="Search SOP / error code..." />
+      </div>
+
+      <div class="nav-role-tabs">
+        <button class="nav-role-btn active" data-role="all">All</button>
+        <button class="nav-role-btn" data-role="operator">Operator</button>
+        <button class="nav-role-btn" data-role="quality">Quality</button>
+        <button class="nav-role-btn" data-role="maintenance">Maint.</button>
+      </div>
+
+      <ul class="nav-menu">
+        <li class="nav-item active" data-target="sec-purpose"><a href="#sec-purpose">1. Purpose & QC Philosophy</a></li>
+        <li class="nav-item" data-target="sec-hardware"><a href="#sec-hardware">2. Station Architecture</a></li>
+        <li class="nav-item" data-target="sec-startup"><a href="#sec-startup">3. Zero-Touch Startup</a></li>
+        <li class="nav-item" data-target="sec-operator-sop"><a href="#sec-operator-sop">4. Daily Operator SOP</a></li>
+        <li class="nav-item" data-target="sec-bom-standard"><a href="#sec-bom-standard">5. Standard Plant BOM Format</a></li>
+        <li class="nav-item" data-target="sec-labeling-sop"><a href="#sec-labeling-sop">6. Auto-Labeling Studio SOP</a></li>
+        <li class="nav-item" data-target="sec-training-sop"><a href="#sec-training-sop">7. YOLO26 Training & Hot-Swap</a></li>
+        <li class="nav-item" data-target="sec-tripwire-calib"><a href="#sec-tripwire-calib">8. Tripwire Calibration</a></li>
+        <li class="nav-item" data-target="sec-troubleshooting"><a href="#sec-troubleshooting">9. Troubleshooting Matrix</a></li>
+        <li class="nav-item" data-target="sec-checklist"><a href="#sec-checklist">10. Shift Handover Checklist</a></li>
+      </ul>
+    </aside>
+
+    <!-- Main Content Document -->
+    <main class="sop-content">
+
+      <!-- Section 1: Purpose & Quality Gate -->
+      <section id="sec-purpose" class="sop-section" data-roles="all">
+        <h2>1. Purpose & Quality Gate Philosophy</h2>
+        <p>
+          This Standard Operating Procedure (SOP) governs the operation, inspection, quality verification, and maintenance of the <strong>Industrial Conveyor Belt BOM Vision Inspector</strong> installed on Packaging Line 1 at the Khalapur Knock-Down (KD) Furniture Facility.
+        </p>
+
+        <div class="callout callout-qc-gate">
+          <strong>Mandatory 100% Match QC Gate Rule:</strong>
+          Under zero circumstances may a packaging kit carton be closed or a QC shipping barcode label printed if any hardware item has a count discrepancy ($\text{Counted} \neq \text{Target}$). If any item is missing or over-counted, the system automatically engages the physical conveyor interlock and blocks label generation.
+        </div>
+
+        <h3>1.1 Scope</h3>
+        <p>
+          Applies to all hardware packing kits (`HRD PKT`) containing fasteners, plugs, dowels, brackets, and hinges. The vision station verifies individual components tumbled across the conveyor belt prior to boxing.
+        </p>
+      </section>
+
+      <!-- Section 2: Hardware Architecture -->
+      <section id="sec-hardware" class="sop-section" data-roles="all">
+        <h2>2. Station Architecture & Layout</h2>
+        <p>The inspection cell consists of the following tightly integrated physical and logical components:</p>
+
+        <table class="sop-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Specification</th>
+              <th>Industrial Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Overhead Camera</strong></td>
+              <td>1280x720 / 1920x1080 @ 30-60 FPS Industrial USB3 / RTSP</td>
+              <td>Captures clear, orthogonal top-down frames of hardware fasteners moving on the conveyor belt.</td>
+            </tr>
+            <tr>
+              <td><strong>Conveyor Belt</strong></td>
+              <td>Matte Black / Dark Green Anti-Static Belt (0.2 - 0.4 m/s)</td>
+              <td>Provides high-contrast background for fastener oriented bounding box (OBB) contour segmentation.</td>
+            </tr>
+            <tr>
+              <td><strong>Virtual Tripwire</strong></td>
+              <td>Mathematical 2D line segment ($P_1 \to P_2$) with normal vector check</td>
+              <td>Increments the counted quantity of a tracked fastener only when its centroid crosses the line in the downstream direction.</td>
+            </tr>
+            <tr>
+              <td><strong>Vision Engine</strong></td>
+              <td>Ultralytics YOLO26-OBB (<code>nms=False</code>) + ByteTrack</td>
+              <td>Performs high-speed edge inference with oriented rotation angles ($\theta$) and persistent track IDs.</td>
+            </tr>
+            <tr>
+              <td><strong>Barcode Scanner</strong></td>
+              <td>Zebra DS2208 Handheld 2D/1D Scanner (USB Virtual COM)</td>
+              <td>Instantly loads active BOM recipe when operator scans the Master Item Code traveler.</td>
+            </tr>
+            <tr>
+              <td><strong>QC Label Printer</strong></td>
+              <td>Zebra ZD421 Industrial Direct Thermal (203 DPI)</td>
+              <td>Prints authorized QC barcode pass label upon 100% verification match.</td>
+            </tr>
+            <tr>
+              <td><strong>PLC / Relay Interlock</strong></td>
+              <td>Modbus TCP / Opto-isolated 24V Relay</td>
+              <td>Stops conveyor drive or triggers pneumatic reject gate if batch fails verification.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Section 3: Startup Procedure -->
+      <section id="sec-startup" class="sop-section" data-roles="operator maintenance">
+        <h2>3. Zero-Touch Startup Procedure</h2>
+
+        <div class="workflow-grid">
+          <div class="workflow-card">
+            <span class="step-num">Step 1</span>
+            <h4>Power Inspection Cell</h4>
+            <p>Ensure overhead industrial LED illumination is ON and conveyor main drive is energized.</p>
+          </div>
+          <div class="workflow-card">
+            <span class="step-num">Step 2</span>
+            <h4>Execute Launcher</h4>
+            <p>On Windows 11 desktop, double-click <code>start_windows.bat</code>. No terminal commands required.</p>
+          </div>
+          <div class="workflow-card">
+            <span class="step-num">Step 3</span>
+            <h4>Automatic Self-Check</h4>
+            <p>The launcher activates <code>.venv</code>, verifies database tables, and starts the inspection service.</p>
+          </div>
+          <div class="workflow-card">
+            <span class="step-num">Step 4</span>
+            <h4>Browser Interface Ready</h4>
+            <p>Chrome automatically opens to <code>http://localhost:8000</code> with the default recipe pre-loaded.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-note">
+          <strong>Ubuntu Linux Production Note:</strong> On plant servers, the station runs automatically on system boot via <code>systemd</code>. Verify status with: <code>sudo systemctl status bom-inspector.service</code>.
+        </div>
+      </section>
+
+      <!-- Section 4: Daily Operator SOP -->
+      <section id="sec-operator-sop" class="sop-section" data-roles="operator">
+        <h2>4. Daily Line Operator SOP (Step-by-Step)</h2>
+
+        <h3>4.1 Shift Routine Flowchart</h3>
+        <ol>
+          <li>
+            <strong>Scan Production Traveler Barcode:</strong> Pick up handheld scanner and scan the Master Item Code on the job sheet (e.g. <code>31162814SD05076</code>). The title bar updates immediately with the recipe badge.
+          </li>
+          <li>
+            <strong>Start Conveyor Feed:</strong> Tumble or place hardware components onto the moving belt upstream of the virtual tripwire line.
+          </li>
+          <li>
+            <strong>Monitor Excel Recipe Grid:</strong> Observe the 35% right-hand pane as counts increment in real-time. Follow the color guide below:
+          </li>
+        </ol>
+
+        <table class="sop-table">
+          <thead>
+            <tr>
+              <th>Status Badge</th>
+              <th>Row Color</th>
+              <th>Meaning</th>
+              <th>Operator Action Required</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-prog">PROG</span></td>
+              <td style="background:#FFF4CE; font-weight:bold;">Pale Yellow</td>
+              <td>In Progress (Counted &gt; 0 but &lt; Target)</td>
+              <td>Continue feeding remaining parts of this type.</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-pass">MATCH</span></td>
+              <td style="background:#DFF6DD; color:#107C10; font-weight:bold;">Pale Green</td>
+              <td>Exact Target Match ($\text{Counted} = \text{Target}$)</td>
+              <td>Target reached. Do not feed additional items of this type.</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-fail">OVER</span></td>
+              <td style="background:#FDE7E9; color:#D13438; font-weight:bold;">Pale Red</td>
+              <td>Over-Counted ($\text{Counted} &gt; \text{Target}$)</td>
+              <td>Stop feed. Remove excess item from collection bin. Click "Reset Counts".</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-excl">EXCL</span></td>
+              <td style="background:#EDEBE9; color:#797775; font-style:italic;">Slate Gray</td>
+              <td>Packaging Excluded (Carton, Box)</td>
+              <td>Handled manually. Excluded from tripwire gate.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>4.2 Batch Completion & Label Printing</h3>
+        <ol start="4">
+          <li>
+            When all items show <span class="badge badge-pass">MATCH</span> and the top banner turns <strong>GREEN ("PASS - 100% BOM MATCH")</strong>, click the ribbon button <strong>"Complete Batch & Print QC Label"</strong>.
+          </li>
+          <li>
+            The Zebra printer dispenses an authorized QC Barcode sticker containing the verification token (e.g. <code>QC-E7A492B1</code>). Apply the sticker to the carton face.
+          </li>
+          <li>
+            Click <strong>"Reset Counts"</strong> to prepare the station for the next kit.
+          </li>
+        </ol>
+
+        <div class="callout callout-qc-gate">
+          <strong>Protocol if Batch is BLOCKED (Red Alert Modal):</strong><br/>
+          If the Red Alert Dialog appears, review the exact list of missing drawing numbers. Retrieve the missing items from stock bins, feed them across the tripwire, confirm they turn green, and re-click "Complete Batch".
+        </div>
+      </section>
+
+      <!-- Section 5: Standard Plant BOM Format -->
+      <section id="sec-bom-standard" class="sop-section" data-roles="quality">
+        <h2>5. Standard Plant BOM Format (CSV & Excel)</h2>
+        <p>
+          All manufacturing plant BOMs must strictly comply with the standard layout defined below. The system automatically ingests <code>.csv</code>, <code>.xlsx</code>, and <code>.xls</code> files.
+        </p>
+
+        <h3>5.1 Master Reference Layout: Kit <code>31162814SD05076</code></h3>
+        <div class="callout callout-note">
+          <strong>Plant Kit Description:</strong> HRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3 (HRD199065)<br/>
+          <strong>Target Vision Verification Pieces:</strong> 128 Pieces (Across 15 Hardware Items + 1 Excluded Outer Carton)
+        </div>
+
+        <table class="sop-table">
+          <thead>
+            <tr>
+              <th>Sr</th>
+              <th>Item Description</th>
+              <th>Drawing No</th>
+              <th>Canonical UID</th>
+              <th>Qty</th>
+              <th>Vision Active</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>LEVELER FOR LEG KREATION X3</td>
+              <td>HOM196273</td>
+              <td><code>HOM196273</code></td>
+              <td><strong>2</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>SHELF SUPPORT</td>
+              <td>DOS210915</td>
+              <td><code>DOS210915</code></td>
+              <td><strong>8</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>HEX NUT (3/16" BSW)</td>
+              <td>HRD100314</td>
+              <td><code>HRD100314</code></td>
+              <td><strong>8</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>RD. HD COMBI SLOT SCREW 3/16 X 3/8</td>
+              <td>HRD131022</td>
+              <td><code>HRD131022</code></td>
+              <td><strong>8</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>M4x12L PH HD CSK SCREW ZN PLATED</td>
+              <td>HRD163160</td>
+              <td><code>HRD163160</code></td>
+              <td><strong>12</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>COMBI PAN HD INT WASH M4x12 SCREW</td>
+              <td>HRD104875</td>
+              <td><code>HRD104875</code></td>
+              <td><strong>50</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>Sensys Hinge - 24 mm - 0 Crank...</td>
+              <td>EOM146525</td>
+              <td><code>EOM146525</code></td>
+              <td><strong>6</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>PLASTIC HOLDER FOR HANGING ROD KREATION X3</td>
+              <td>HOM200187</td>
+              <td><code>HOM200187</code></td>
+              <td><strong>2</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td>HEX HEAD BOLT M4 X 6MM ZN BLUE PLATING</td>
+              <td>HRD204111</td>
+              <td><code>HRD204111</code></td>
+              <td><strong>2</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td>PLATE FOR HANGING ROD FIXING KREATION X3</td>
+              <td>HOM164412</td>
+              <td><code>HOM164412</code></td>
+              <td><strong>2</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td>CSK ST SCREW NO 6 X 25</td>
+              <td>HRD100690</td>
+              <td><code>HRD100690</code></td>
+              <td><strong>8</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td>PH CW SELF TAP SCR NO 6 x 13L</td>
+              <td>HRD100804</td>
+              <td><code>HRD100804</code></td>
+              <td><strong>6</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td>STUD</td>
+              <td>HOM144640</td>
+              <td><code>HOM144640</code></td>
+              <td><strong>6</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>14</td>
+              <td>CAP FOR BACK PANEL OF WALL UNIT STEEL KITCHEN</td>
+              <td>HOM195865</td>
+              <td><code>HOM195865</code></td>
+              <td><strong>2</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr>
+              <td>15</td>
+              <td>M4 SLEEVE CONNECTING SCREW MAKE EBCO - CNS35-S</td>
+              <td>—</td>
+              <td><code>NO_DWG_M4_SLEEVE_...</code></td>
+              <td><strong>6</strong></td>
+              <td><span class="badge badge-pass">YES</span></td>
+            </tr>
+            <tr style="background:#EDEBE9; color:#797775;">
+              <td>16</td>
+              <td>CARTON (470L × 140W × 55H)</td>
+              <td>—</td>
+              <td><code>NO_DWG_CARTON_...</code></td>
+              <td>1</td>
+              <td><span class="badge badge-excl">EXCLUDED</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>5.2 Canonical Part Slugging Rule</h3>
+        <p>
+          Fasteners lacking formal drawing numbers (marked as <code>—</code>, <code>-</code>, or <code>NA</code>) are automatically assigned deterministic uppercase slugs prefixed with <code>NO_DWG_</code>. This guarantees persistent class indexing in the YOLO database without manual intervention.
+        </p>
+
+        <h3>5.3 Packaging Exclusion Rule</h3>
+        <p>
+          Line items containing terms like <code>CARTON</code>, <code>CORRUGATED BOX</code>, or <code>MASTER BAG</code> automatically have their <code>is_vision_inspected</code> flag defaulted to <code>False</code>. They remain visible in the BOM table but do not block the conveyor tripwire verification gate.
+        </p>
+      </section>
+
+      <!-- Section 6: Auto-Labeling Studio -->
+      <section id="sec-labeling-sop" class="sop-section" data-roles="quality maintenance">
+        <h2>6. Auto-Labeling Studio SOP</h2>
+        <p>When introducing a new BOM with previously unseen parts:</p>
+
+        <ol>
+          <li>Navigate to the <strong>Dataset & Labeling</strong> ribbon tab.</li>
+          <li>Place 5 to 10 sample hardware pieces on the stationary conveyor belt.</li>
+          <li>Click <strong>"Capture Frame"</strong>. The high-resolution camera frame appears on the canvas.</li>
+          <li>
+            Click <strong>"Re-Segment Contours"</strong>. OpenCV adaptive thresholding automatically extracts candidate Oriented Bounding Boxes (OBB).
+          </li>
+          <li>Click a box on the canvas and assign the corresponding Part Drawing Number from the dropdown.</li>
+          <li>Click <strong>"Save YOLO-OBB Labels"</strong>. The images and normalized 8-point polygon annotations are saved directly into <code>datasets/bom_dataset/</code>.</li>
+        </ol>
+      </section>
+
+      <!-- Section 7: YOLO26 Training & Hot-Swapping -->
+      <section id="sec-training-sop" class="sop-section" data-roles="maintenance">
+        <h2>7. Model Training & Live Hot-Swapping</h2>
+        <p>
+          The system features an autonomous background training runner utilizing Ultralytics YOLO26-OBB with native end-to-end inference (<code>nms=False</code>).
+        </p>
+
+        <ol>
+          <li>Select the <strong>Model Training</strong> ribbon tab.</li>
+          <li>Choose the base architecture:
+            <ul>
+              <li><code>yolo26n-obb.pt</code>: Nano model. Fastest inference (&lt;10ms), recommended for low-power edge PCs.</li>
+              <li><code>yolo26s-obb.pt</code>: Small model. Recommended balance of speed and precision for small screw threads.</li>
+            </ul>
+          </li>
+          <li>Set image size to <strong>1280</strong> (critical for small fastener thread pitch resolution).</li>
+          <li>Click <strong>"Start YOLO26-OBB Training"</strong>.</li>
+          <li>Monitor real-time training loss and mAP50 convergence on the live dashboard.</li>
+          <li>Upon completion, click <strong>"Activate Model"</strong> in the weights table. The running vision thread reloads weights into RAM instantaneously without stopping the conveyor.</li>
+        </ol>
+      </section>
+
+      <!-- Section 8: Tripwire Calibration -->
+      <section id="sec-tripwire-calib" class="sop-section" data-roles="maintenance">
+        <h2>8. Virtual Tripwire Calibration SOP</h2>
+        <p>
+          The virtual tripwire must be calibrated perpendicularly to the conveyor belt travel direction:
+        </p>
+        <ol>
+          <li>On the <strong>Home / Inspection</strong> ribbon, click <strong>"Tripwire Adjust"</strong>. Yellow grab handles appear at coordinates $P_1$ and $P_2$.</li>
+          <li>Drag $P_1$ to the top edge of the conveyor belt and $P_2$ to the bottom edge.</li>
+          <li>Ensure the line is positioned downstream of the initial tumbling zone so parts have stabilized before crossing.</li>
+          <li>Click "Tripwire Adjust" again to lock the coordinates into the persistent database.</li>
+        </ol>
+      </section>
+
+      <!-- Section 9: Troubleshooting Matrix -->
+      <section id="sec-troubleshooting" class="sop-section" data-roles="all">
+        <h2>9. Maintenance & Troubleshooting Matrix</h2>
+
+        <table class="sop-table">
+          <thead>
+            <tr>
+              <th class="w-32">Fault Condition</th>
+              <th class="w-48">Probable Root Cause</th>
+              <th>Corrective Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Over-Count False Triggers</strong></td>
+              <td>Belt reflections, conveyor seam glint, or operator hands passing line.</td>
+              <td>Adjust OpenCV threshold slider; ensure operators keep hands clear of the active tripwire line during feeding.</td>
+            </tr>
+            <tr>
+              <td><strong>Missing Screw Detection</strong></td>
+              <td>Fasteners touching or overlapping each other as they cross tripwire.</td>
+              <td>Spread fasteners evenly on the belt during feed; re-train model with more clustered dataset samples.</td>
+            </tr>
+            <tr>
+              <td><strong>Camera Status "OFFLINE"</strong></td>
+              <td>USB3 cable loose or RTSP camera network packet loss.</td>
+              <td>Re-seat industrial locking USB3 cable; verify camera power supply; toggle "Camera Source" in ribbon.</td>
+            </tr>
+            <tr>
+              <td><strong>Zebra Label Not Printing</strong></td>
+              <td>Batch is BLOCKED due to count mismatch; or printer out of media.</td>
+              <td>Resolve missing items listed in Red Modal; check Zebra printer green LED status and ribbon supply.</td>
+            </tr>
+            <tr>
+              <td><strong>Recipe Not Loading on Scan</strong></td>
+              <td>Barcode reader carriage return suffix disabled or invalid code.</td>
+              <td>Scan Zebra configuration barcode "Add Enter Suffix"; confirm Master Code exists in BOM Recipes tab.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Section 10: Shift Handover Checklist -->
+      <section id="sec-checklist" class="sop-section" data-roles="operator maintenance">
+        <h2>10. Shift Handover Verification Checklist</h2>
+        <p>Every shift supervisor must complete this digital signoff at the start and end of each production shift:</p>
+
+        <ul class="checklist">
+          <li>
+            <input type="checkbox" id="chk1" />
+            <label for="chk1">Overhead LED illuminators cleaned and dust-free.</label>
+          </li>
+          <li>
+            <input type="checkbox" id="chk2" />
+            <label for="chk2">Conveyor belt surface inspected for scratches, metallic debris, or oil stains.</label>
+          </li>
+          <li>
+            <input type="checkbox" id="chk3" />
+            <label for="chk3">Virtual Tripwire aligned perpendicularly across belt width.</label>
+          </li>
+          <li>
+            <input type="checkbox" id="chk4" />
+            <label for="chk4">Verified test pass of standard master kit <code>31162814SD05076</code> (128 pcs target).</label>
+          </li>
+          <li>
+            <input type="checkbox" id="chk5" />
+            <label for="chk5">Zebra QC thermal label roll verified with minimum 50 labels remaining.</label>
+          </li>
+          <li>
+            <input type="checkbox" id="chk6" />
+            <label for="chk6">Emergency stop switch and conveyor interlock relay functional.</label>
+          </li>
+        </ul>
+
+        <div style="margin-top: 12px;">
+          <button onclick="resetChecklist()" style="padding: 6px 12px; font-size: 11px; background:#EDEBE9; border:1px solid #D2D0CE; border-radius:4px; cursor:pointer;">
+            Reset Shift Checklist
+          </button>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Floating Print Action -->
+  <div class="print-action-bar">
+    <button class="btn-print" onclick="printSOP()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/>
+        <path d="M6 14h12v8H6z"/>
+      </svg>
+      Print Official SOP / Save PDF
+    </button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

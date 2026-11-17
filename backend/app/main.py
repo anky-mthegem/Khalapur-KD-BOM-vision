@@ -71,6 +71,11 @@ app.include_router(audit_router)
 # Mount audit snapshots static directory
 app.mount("/static_audit", StaticFiles(directory=str(STATIC_AUDIT_DIR)), name="static_audit")
 
+# Mount Industrial SOP & User Manual HTML Project
+manual_dir = PROJECT_ROOT / "manual"
+if manual_dir.exists():
+    app.mount("/manual", StaticFiles(directory=str(manual_dir), html=True), name="manual")
+
 # Production: Mount frontend build if dist folder exists
 frontend_dist = PROJECT_ROOT / "frontend" / "dist"
 if frontend_dist.exists():

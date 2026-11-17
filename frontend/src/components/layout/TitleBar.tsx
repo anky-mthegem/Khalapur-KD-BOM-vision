@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, Cpu, Radio, ShieldCheck, Factory } from 'lucide-react';
+import { Camera, Cpu, Radio, ShieldCheck, Factory, BookOpen } from 'lucide-react';
 
 interface TitleBarProps {
   activeMasterCode: string;
@@ -52,6 +52,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <ShieldCheck className="w-3.5 h-3.5 text-green-400" />
           <span>v2.6.0-OBB</span>
         </div>
+
+        <a
+          href="/manual"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center space-x-1.5 bg-[#107C41] hover:bg-[#0E6032] text-white px-2.5 py-1 rounded border border-green-300/40 text-[11px] font-semibold transition-colors shadow-sm ml-2"
+          title="Open Standard Operating Procedure (SOP) & Operator Manual"
+        >
+          <BookOpen className="w-3.5 h-3.5 text-yellow-300" />
+          <span>SOP Manual</span>
+        </a>
       </div>
     </div>
   );
