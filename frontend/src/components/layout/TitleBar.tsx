@@ -54,7 +54,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         </div>
 
         <a
-          href="/manual"
+          href="/manual/"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center space-x-1.5 bg-[#107C41] hover:bg-[#0E6032] text-white px-2.5 py-1 rounded border border-green-300/40 text-[11px] font-semibold transition-colors shadow-sm ml-2"

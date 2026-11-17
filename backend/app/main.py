@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 from backend.app.config import settings, STATIC_AUDIT_DIR, PROJECT_ROOT
 from backend.app.database import init_db, SyncSessionLocal
@@ -74,6 +75,10 @@ app.mount("/static_audit", StaticFiles(directory=str(STATIC_AUDIT_DIR)), name="s
 # Mount Industrial SOP & User Manual HTML Project
 manual_dir = PROJECT_ROOT / "manual"
 if manual_dir.exists():
+    @app.get("/manual", include_in_schema=False)
+    def redirect_manual():
+        return RedirectResponse(url="/manual/")
+
     app.mount("/manual", StaticFiles(directory=str(manual_dir), html=True), name="manual")
 
 # Production: Mount frontend build if dist folder exists

@@ -98,7 +98,7 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
         </div>
 
         <a
-          href="/manual"
+          href="/manual/"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center space-x-1.5 text-[#2B579A] hover:text-[#107C10] hover:bg-white px-2.5 py-1 rounded border border-transparent hover:border-gray-300 font-semibold transition-colors"
