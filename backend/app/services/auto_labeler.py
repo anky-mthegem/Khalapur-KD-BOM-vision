@@ -82,26 +82,31 @@ class AutoLabelerService:
 
         cv2.imwrite(str(img_path), image)
 
-        # Lookup class IDs from DB by part_uid or item_name
+        # Lookup class IDs from DB by drawing_no, part_uid, or item_name
         with SyncSessionLocal() as db:
             parts = db.query(PartsCatalog).all()
+            dwg_map = {p.drawing_no: p.yolo_class_id for p in parts}
             part_map = {p.part_uid: p.yolo_class_id for p in parts}
             name_map = {p.item_name: p.yolo_class_id for p in parts}
 
             lines = []
             labeled_parts_set = set()
             for ann in annotations:
+                dwg_no = ann.get("drawing_no")
                 part_uid = ann.get("part_uid")
                 item_name = ann.get("item_name") or ann.get("label")
                 
                 class_id = None
                 matched_key = None
-                if item_name and item_name in name_map:
-                    class_id = name_map[item_name]
-                    matched_key = item_name
+                if dwg_no and dwg_no in dwg_map:
+                    class_id = dwg_map[dwg_no]
+                    matched_key = dwg_no
                 elif part_uid and part_uid in part_map:
                     class_id = part_map[part_uid]
                     matched_key = part_uid
+                elif item_name and item_name in name_map:
+                    class_id = name_map[item_name]
+                    matched_key = item_name
                 
                 if class_id is None:
                     continue
@@ -122,7 +127,7 @@ class AutoLabelerService:
             # Update sample counts in database
             for p_key in labeled_parts_set:
                 part = db.query(PartsCatalog).filter(
-                    (PartsCatalog.part_uid == p_key) | (PartsCatalog.item_name == p_key)
+                    (PartsCatalog.drawing_no == p_key) | (PartsCatalog.part_uid == p_key) | (PartsCatalog.item_name == p_key)
                 ).first()
                 if part:
                     part.sample_count += 1

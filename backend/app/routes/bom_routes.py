@@ -54,22 +54,32 @@ async def upload_bom_preview(file: UploadFile = File(...), db: AsyncSession = De
     preview_items = []
     new_parts_count = 0
     excluded_count = 0
+    missing_dwg_count = 0
 
     for item in parsed_data["items"]:
-        p_uid = item["part_uid"]
-        is_new = p_uid not in existing_catalog
-        if is_new:
-            new_parts_count += 1
+        dwg = (item.get("drawing_no") or "").strip()
+        has_dwg = bool(dwg and dwg not in ["—", "-", "NA", "N/A"])
+        p_uid = dwg if has_dwg else ""
+
+        if not has_dwg:
+            missing_dwg_count += 1
+            is_new = False
+            training_status = "UNTRAINED"
+        else:
+            is_new = p_uid not in existing_catalog
+            if is_new:
+                new_parts_count += 1
+            training_status = existing_catalog.get(p_uid, "UNTRAINED")
+
         if not item["is_vision_inspected"]:
             excluded_count += 1
-
-        training_status = existing_catalog.get(p_uid, "UNTRAINED")
 
         preview_items.append({
             "sr_no": item["sr_no"],
             "part_uid": p_uid,
             "item_name": item["item_name"],
-            "drawing_no": item["drawing_no"],
+            "drawing_no": dwg,
+            "has_drawing_no": has_dwg,
             "target_qty": item["target_qty"],
             "is_vision_inspected": item["is_vision_inspected"],
             "is_new_part": is_new,
@@ -80,10 +90,11 @@ async def upload_bom_preview(file: UploadFile = File(...), db: AsyncSession = De
         "master_item_code": parsed_data["master_item_code"],
         "description": parsed_data["description"],
         "sheet_name": parsed_data["sheet_name"],
-        "total_items": parsed_data["total_items"],
+        "total_items": len(preview_items),
         "vision_items_count": parsed_data["vision_items_count"],
         "excluded_packaging_count": excluded_count,
         "new_parts_count": new_parts_count,
+        "missing_dwg_count": missing_dwg_count,
         "items": preview_items
     }
 
@@ -122,22 +133,32 @@ async def parse_pasted_bom(payload: PasteBomRequest, db: AsyncSession = Depends(
     preview_items = []
     new_parts_count = 0
     excluded_count = 0
+    missing_dwg_count = 0
 
     for item in parsed_data["items"]:
-        p_uid = item["part_uid"]
-        is_new = p_uid not in existing_catalog
-        if is_new:
-            new_parts_count += 1
+        dwg = (item.get("drawing_no") or "").strip()
+        has_dwg = bool(dwg and dwg not in ["—", "-", "NA", "N/A"])
+        p_uid = dwg if has_dwg else ""
+
+        if not has_dwg:
+            missing_dwg_count += 1
+            is_new = False
+            training_status = "UNTRAINED"
+        else:
+            is_new = p_uid not in existing_catalog
+            if is_new:
+                new_parts_count += 1
+            training_status = existing_catalog.get(p_uid, "UNTRAINED")
+
         if not item["is_vision_inspected"]:
             excluded_count += 1
-
-        training_status = existing_catalog.get(p_uid, "UNTRAINED")
 
         preview_items.append({
             "sr_no": item["sr_no"],
             "part_uid": p_uid,
             "item_name": item["item_name"],
-            "drawing_no": item["drawing_no"],
+            "drawing_no": dwg,
+            "has_drawing_no": has_dwg,
             "target_qty": item["target_qty"],
             "is_vision_inspected": item["is_vision_inspected"],
             "is_new_part": is_new,
@@ -148,10 +169,11 @@ async def parse_pasted_bom(payload: PasteBomRequest, db: AsyncSession = Depends(
         "master_item_code": parsed_data["master_item_code"],
         "description": parsed_data["description"],
         "sheet_name": parsed_data["sheet_name"],
-        "total_items": parsed_data["total_items"],
+        "total_items": len(preview_items),
         "vision_items_count": parsed_data["vision_items_count"],
         "excluded_packaging_count": excluded_count,
         "new_parts_count": new_parts_count,
+        "missing_dwg_count": missing_dwg_count,
         "items": preview_items
     }
 
@@ -159,10 +181,24 @@ async def parse_pasted_bom(payload: PasteBomRequest, db: AsyncSession = Depends(
 async def commit_bom_recipe(payload: BomCommitRequest, db: AsyncSession = Depends(get_db)):
     """
     Commits a previewed recipe to SQLite and registers any new parts in parts_catalog.
+    Enforces that 100% of items have a valid non-empty Drawing Number.
     """
-    # 1. Upsert missing parts in parts_catalog
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Cannot commit an empty BOM. Recipe must contain at least one item.")
+
+    # Strict Validation: Every item must have a valid Drawing Number
+    for it in payload.items:
+        dwg = (it.drawing_no or "").strip()
+        if not dwg or dwg in ["—", "-", "NA", "N/A"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Item '{it.item_name}' (Sr No {it.sr_no}) is missing a Drawing Number. Every item in the BOM must have a Drawing Number to be registered in the vision system."
+            )
+
+    # 1. Upsert missing parts in parts_catalog using drawing_no as unique key and part_uid
     for item in payload.items:
-        res = await db.execute(select(PartsCatalog).filter_by(part_uid=item.part_uid))
+        dwg = item.drawing_no.strip().upper()
+        res = await db.execute(select(PartsCatalog).filter_by(drawing_no=dwg))
         part = res.scalars().first()
         if not part:
             max_id_res = await db.execute(select(func.max(PartsCatalog.yolo_class_id)))
@@ -170,14 +206,18 @@ async def commit_bom_recipe(payload: BomCommitRequest, db: AsyncSession = Depend
             next_class_id = 0 if max_id is None else max_id + 1
 
             new_part = PartsCatalog(
-                part_uid=item.part_uid,
+                part_uid=dwg,
+                drawing_no=dwg,
                 item_name=item.item_name,
-                drawing_no=item.drawing_no if item.drawing_no != "—" else None,
                 yolo_class_id=next_class_id,
                 training_status="UNTRAINED",
                 sample_count=0
             )
             db.add(new_part)
+        else:
+            # Keep item_name up to date attached to drawing_no
+            part.item_name = item.item_name
+            part.part_uid = dwg
     await db.commit()
 
     # 2. Upsert Recipe
@@ -200,24 +240,25 @@ async def commit_bom_recipe(payload: BomCommitRequest, db: AsyncSession = Depend
         recipe.total_items = len(payload.items)
         recipe.vision_items_count = vision_count
         # Clear existing items
-        await db.execute(select(BomRecipeItem).filter_by(recipe_id=recipe.id))
         for existing_it in (await db.execute(select(BomRecipeItem).filter_by(recipe_id=recipe.id))).scalars().all():
             await db.delete(existing_it)
 
-    # Insert line items
+    # Insert line items with drawing_no as part_uid
     for it in payload.items:
+        dwg = it.drawing_no.strip().upper()
         line_item = BomRecipeItem(
             recipe_id=recipe.id,
             sr_no=it.sr_no,
-            part_uid=it.part_uid,
+            part_uid=dwg,
+            drawing_no=dwg,
             item_name=it.item_name,
-            drawing_no=it.drawing_no,
             target_qty=it.target_qty,
             is_vision_inspected=it.is_vision_inspected
         )
         db.add(line_item)
 
     await db.commit()
+    return {"status": "SUCCESS", "master_item_code": recipe.master_item_code, "total_items": recipe.total_items}
     return {"status": "SUCCESS", "master_item_code": recipe.master_item_code, "total_items": recipe.total_items}
 
 @router.get("/recipes")

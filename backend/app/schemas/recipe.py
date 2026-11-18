@@ -6,7 +6,7 @@ class RecipeItemBase(BaseModel):
     sr_no: int
     part_uid: str
     item_name: str
-    drawing_no: Optional[str] = "—"
+    drawing_no: str
     target_qty: int
     is_vision_inspected: bool = True
 
@@ -38,6 +38,7 @@ class BomPreviewItem(BaseModel):
     part_uid: str
     item_name: str
     drawing_no: str
+    has_drawing_no: bool = True
     target_qty: int
     is_vision_inspected: bool
     is_new_part: bool
@@ -51,6 +52,7 @@ class BomPreviewResponse(BaseModel):
     vision_items_count: int
     excluded_packaging_count: int
     new_parts_count: int
+    missing_dwg_count: int = 0
     items: List[BomPreviewItem]
 
 class BomCommitRequest(BaseModel):

@@ -12,7 +12,7 @@ class PartsCatalog(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     part_uid = Column(String(128), unique=True, index=True, nullable=False)
     item_name = Column(String(255), nullable=False)
-    drawing_no = Column(String(64), nullable=True)
+    drawing_no = Column(String(64), unique=True, index=True, nullable=False)
     yolo_class_id = Column(Integer, unique=True, index=True, nullable=False)
     training_status = Column(String(32), default="UNTRAINED", nullable=False)  # UNTRAINED, LABELED, TRAINED
     sample_count = Column(Integer, default=0, nullable=False)
@@ -24,7 +24,7 @@ class PartsCatalog(Base):
             "id": self.id,
             "part_uid": self.part_uid,
             "item_name": self.item_name,
-            "drawing_no": self.drawing_no or "—",
+            "drawing_no": self.drawing_no,
             "yolo_class_id": self.yolo_class_id,
             "training_status": self.training_status,
             "sample_count": self.sample_count,

@@ -39,7 +39,7 @@ class BomRecipeItem(Base):
     sr_no = Column(Integer, nullable=False)
     part_uid = Column(String(128), ForeignKey("parts_catalog.part_uid"), nullable=False)
     item_name = Column(String(255), nullable=False)
-    drawing_no = Column(String(64), nullable=True)
+    drawing_no = Column(String(64), nullable=False)
     target_qty = Column(Integer, nullable=False)
     is_vision_inspected = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -53,7 +53,7 @@ class BomRecipeItem(Base):
             "sr_no": self.sr_no,
             "part_uid": self.part_uid,
             "item_name": self.item_name,
-            "drawing_no": self.drawing_no or "—",
+            "drawing_no": self.drawing_no,
             "target_qty": self.target_qty,
             "is_vision_inspected": self.is_vision_inspected,
             "created_at": self.created_at.isoformat() if self.created_at else None,

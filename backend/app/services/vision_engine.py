@@ -143,8 +143,8 @@ class VisionEngine:
         try:
             with SyncSessionLocal() as db:
                 parts = db.query(PartsCatalog).all()
-                self.classes_map = {p.yolo_class_id: p.part_uid for p in parts}
-                self.names_map = {p.part_uid: p.item_name for p in parts}
+                self.classes_map = {p.yolo_class_id: p.drawing_no for p in parts}
+                self.names_map = {p.drawing_no: p.item_name for p in parts}
         except Exception:
             self.classes_map = {}
             self.names_map = {}
@@ -366,8 +366,10 @@ class VisionEngine:
                 if abs(cx - px) > 1 or abs(cy - py) > 1:
                     cv2.line(vis, (px, py), (cx, cy), (0, 200, 255), 2)
 
-            # Label banner
-            label = f"#{obj['track_id']} {obj['part_uid']} ({int(obj['confidence']*100)}%)"
+            # Label banner with Drawing No and Item Name
+            item_name = self.names_map.get(obj['part_uid'], '')
+            short_name = f" {item_name[:16]}.." if item_name else ""
+            label = f"#{obj['track_id']} [{obj['part_uid']}]{short_name} ({int(obj['confidence']*100)}%)"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
             cv2.rectangle(vis, (cx - 10, cy - 25), (cx - 10 + tw + 6, cy - 25 + th + 6), (20, 20, 20), -1)
             cv2.putText(vis, label, (cx - 7, cy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 128), 1)

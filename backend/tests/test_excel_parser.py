@@ -64,7 +64,7 @@ def test_excel_parser_merged_headers_and_items():
         items = parsed["items"]
         assert items[0]["part_uid"] == "HOM196273"
         assert items[0]["is_vision_inspected"] is True
-        assert items[2]["part_uid"] == "NO_DWG_M4_SLEEVE_CONNECTING_SCREW_MAKE_EBCO_CNS35_S"
+        assert items[2]["has_drawing_no"] is False
         assert items[3]["is_vision_inspected"] is False
     finally:
         if tmp_path.exists():
@@ -113,8 +113,8 @@ Sr No,Item Name,Drawing No,Qty
         assert items[5]["drawing_no"] == "HRD104875"
         assert items[5]["target_qty"] == 50
 
-        # Line 15: M4 SLEEVE -> slugged
-        assert items[14]["part_uid"] == "NO_DWG_M4_SLEEVE_CONNECTING_SCREW_MAKE_EBCO_CNS35_S"
+        # Line 15: M4 SLEEVE -> flagged as missing drawing number
+        assert items[14]["has_drawing_no"] is False
         assert items[14]["target_qty"] == 6
         assert items[14]["is_vision_inspected"] is True
 
@@ -138,6 +138,25 @@ def test_pasted_bom_parser():
     assert parsed["master_item_code"] == "31162814SD05076"
     assert parsed["total_items"] == 3
     assert parsed["vision_items_count"] == 2
-    assert parsed["items"][1]["drawing_no"] == "—"
-    assert parsed["items"][1]["part_uid"].startswith("NO_DWG_")
+    assert parsed["missing_dwg_count"] == 2
+    assert parsed["items"][1]["has_drawing_no"] is False
     assert parsed["items"][2]["is_vision_inspected"] is False
+
+def test_delete_missing_drawing_items_filter():
+    """Verify items without drawing number can be filtered/deleted prior to commit."""
+    pasted_text = (
+        "Sr No\tItem Name\tDrawing No\tQty\n"
+        "1\tLEVELER FOR LEG KREATION X3\tHOM196273\t2\n"
+        "2\tITEM WITHOUT DRAWING NUMBER\t—\t4\n"
+        "3\tSHELF SUPPORT\tDOS210915\t8\n"
+    )
+    parsed = PlantExcelBomParser.parse_raw_text(pasted_text)
+    assert parsed["total_items"] == 3
+    assert parsed["missing_dwg_count"] == 1
+
+    # Simulate user deleting the item without drawing number
+    cleaned_items = [it for it in parsed["items"] if it["has_drawing_no"]]
+    assert len(cleaned_items) == 2
+    assert all(it["has_drawing_no"] for it in cleaned_items)
+    assert cleaned_items[0]["drawing_no"] == "HOM196273"
+    assert cleaned_items[1]["drawing_no"] == "DOS210915"

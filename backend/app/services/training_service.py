@@ -52,13 +52,13 @@ class TrainingService:
     def generate_data_yaml(self) -> Path:
         """
         Dynamically generates data.yaml mapped directly to parts_catalog contiguous class IDs,
-        using item_name from the plant BOM as the class label.
+        using drawing_no as the unique YOLO class label.
         """
         yaml_path = DATASETS_DIR / "data.yaml"
         with SyncSessionLocal() as db:
             parts = db.query(PartsCatalog).order_by(PartsCatalog.yolo_class_id).all()
-            # Use item_name as the class label per manufacturing requirement
-            names_dict = {p.yolo_class_id: p.item_name for p in parts}
+            # Use drawing_no as the unique class label in YOLO data.yaml
+            names_dict = {p.yolo_class_id: p.drawing_no for p in parts}
 
         content = {
             "path": str(DATASETS_DIR.resolve()).replace("\\", "/"),

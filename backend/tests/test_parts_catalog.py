@@ -17,9 +17,9 @@ def test_parts_catalog_contiguous_class_ids():
         expected_ids = list(range(len(parts)))
         assert class_ids == expected_ids
 
-        # Check slug part exists
+        # Check part exists with drawing_no
         slug_part = db.query(PartsCatalog).filter_by(
-            part_uid="NO_DWG_M4_SLEEVE_CONNECTING_SCREW_MAKE_EBCO_CNS35_S"
+            drawing_no="EBCO-CNS35-S"
         ).first()
         assert slug_part is not None
         assert slug_part.item_name == "M4 SLEEVE CONNECTING SCREW MAKE EBCO - CNS35-S"

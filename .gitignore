@@ -46,6 +46,7 @@ backend/static_audit/*.jpg
 backend/static_audit/*.png
 /*.pt
 *.cache
+~$*
 backend/models/weights/train_*/
 backend/models/weights/*.pt
 !backend/models/weights/yolo26s-obb.pt

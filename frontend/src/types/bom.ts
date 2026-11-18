@@ -24,6 +24,7 @@ export interface BomPreviewItem {
   part_uid: string;
   item_name: string;
   drawing_no: string;
+  has_drawing_no?: boolean;
   target_qty: number;
   is_vision_inspected: boolean;
   is_new_part: boolean;
@@ -38,6 +39,7 @@ export interface BomPreviewResponse {
   vision_items_count: number;
   excluded_packaging_count: number;
   new_parts_count: number;
+  missing_dwg_count?: number;
   items: BomPreviewItem[];
 }
 

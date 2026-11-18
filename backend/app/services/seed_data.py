@@ -51,8 +51,8 @@ SAMPLE_RECIPE_2_ITEMS = [
     {
         "sr_no": 5,
         "item_name": "CARTON (470L × 140W × 55H)",
-        "drawing_no": "—",
-        "part_uid": "NO_DWG_CARTON_470L_140W_55H",
+        "drawing_no": "PKG-CARTON-470L",
+        "part_uid": "PKG-CARTON-470L",
         "target_qty": 1,
         "is_vision_inspected": False
     }
@@ -174,16 +174,16 @@ SAMPLE_LINE_ITEMS = [
     {
         "sr_no": 15,
         "item_name": "M4 SLEEVE CONNECTING SCREW MAKE EBCO - CNS35-S",
-        "drawing_no": "—",
-        "part_uid": "NO_DWG_M4_SLEEVE_CONNECTING_SCREW_MAKE_EBCO_CNS35_S",
+        "drawing_no": "EBCO-CNS35-S",
+        "part_uid": "EBCO-CNS35-S",
         "target_qty": 6,
         "is_vision_inspected": True
     },
     {
         "sr_no": 16,
         "item_name": "CARTON (470L × 140W × 55H)",
-        "drawing_no": "—",
-        "part_uid": "NO_DWG_CARTON_470L_140W_55H",
+        "drawing_no": "PKG-CARTON-470L",
+        "part_uid": "PKG-CARTON-470L",
         "target_qty": 1,
         "is_vision_inspected": False
     }
@@ -198,12 +198,12 @@ def seed_database_sync(db: Session):
     next_class_id = 0 if max_id is None else max_id + 1
 
     for item in SAMPLE_LINE_ITEMS:
-        part = db.query(PartsCatalog).filter_by(part_uid=item["part_uid"]).first()
+        part = db.query(PartsCatalog).filter_by(drawing_no=item["drawing_no"]).first()
         if not part:
             part = PartsCatalog(
-                part_uid=item["part_uid"],
+                part_uid=item["drawing_no"],
                 item_name=item["item_name"],
-                drawing_no=item["drawing_no"] if item["drawing_no"] != "—" else None,
+                drawing_no=item["drawing_no"],
                 yolo_class_id=next_class_id,
                 training_status="UNTRAINED",
                 sample_count=0
@@ -214,7 +214,8 @@ def seed_database_sync(db: Session):
         else:
             # Update attributes if needed
             part.item_name = item["item_name"]
-            part.drawing_no = item["drawing_no"] if item["drawing_no"] != "—" else None
+            part.part_uid = item["drawing_no"]
+            part.drawing_no = item["drawing_no"]
 
     # Sync sample counts and training status to reflect real dataset labels on disk
     from backend.app.config import DATASETS_DIR
@@ -290,37 +291,41 @@ def create_sample_files():
         excel_path = SAMPLE_DATA_DIR / f"BOM_{m_code}.xlsx"
         csv_path = SAMPLE_DATA_DIR / f"BOM_{m_code}.csv"
 
-        # 1. Create standard CSV
-        lines = [
-            f",Item Code(Master),{m_code},",
-            f",Description,{m_desc},",
-            "Sr No,Item Name,Drawing No,Qty"
-        ]
-        for it in m_items:
-            lines.append(f'{it["sr_no"]},"{it["item_name"]}",{it["drawing_no"]},{it["target_qty"]}')
+        try:
+            # 1. Create standard CSV
+            lines = [
+                f",Item Code(Master),{m_code},",
+                f",Description,{m_desc},",
+                "Sr No,Item Name,Drawing No,Qty"
+            ]
+            for it in m_items:
+                lines.append(f'{it["sr_no"]},"{it["item_name"]}",{it["drawing_no"]},{it["target_qty"]}')
 
-        with open(csv_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+            with open(csv_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
 
-        # 2. Create standard Excel (.xlsx) matching exact plant layout
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "BOM Details"
+            # 2. Create standard Excel (.xlsx) matching exact plant layout
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "BOM Details"
 
-        ws.cell(row=1, column=2, value="Item Code(Master)")
-        ws.cell(row=1, column=3, value=m_code)
+            ws.cell(row=1, column=2, value="Item Code(Master)")
+            ws.cell(row=1, column=3, value=m_code)
 
-        ws.cell(row=2, column=2, value="Description")
-        ws.cell(row=2, column=3, value=m_desc)
+            ws.cell(row=2, column=2, value="Description")
+            ws.cell(row=2, column=3, value=m_desc)
 
-        headers = ["Sr No", "Item Name", "Drawing No", "Qty"]
-        for col_idx, h in enumerate(headers, start=1):
-            ws.cell(row=3, column=col_idx, value=h)
+            headers = ["Sr No", "Item Name", "Drawing No", "Qty"]
+            for col_idx, h in enumerate(headers, start=1):
+                ws.cell(row=3, column=col_idx, value=h)
 
-        for row_idx, item in enumerate(m_items, start=4):
-            ws.cell(row=row_idx, column=1, value=item["sr_no"])
-            ws.cell(row=row_idx, column=2, value=item["item_name"])
-            ws.cell(row=row_idx, column=3, value=item["drawing_no"])
-            ws.cell(row=row_idx, column=4, value=item["target_qty"])
+            for row_idx, item in enumerate(m_items, start=4):
+                ws.cell(row=row_idx, column=1, value=item["sr_no"])
+                ws.cell(row=row_idx, column=2, value=item["item_name"])
+                ws.cell(row=row_idx, column=3, value=item["drawing_no"])
+                ws.cell(row=row_idx, column=4, value=item["target_qty"])
 
-        wb.save(str(excel_path))
+            wb.save(str(excel_path))
+        except (PermissionError, IOError):
+            # File may be open in Microsoft Excel by operator
+            pass

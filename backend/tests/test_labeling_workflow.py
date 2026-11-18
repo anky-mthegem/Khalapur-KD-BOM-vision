@@ -41,13 +41,13 @@ def test_save_component_image_and_summary():
     assert matched_part is not None
     assert matched_part["sample_count"] >= 1
 
-def test_data_yaml_uses_item_names():
+def test_data_yaml_uses_drawing_numbers():
     yaml_path = training_service.generate_data_yaml()
     assert yaml_path.exists()
     import yaml
     with open(yaml_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     assert "names" in config
-    # Ensure values in names are item_names
+    # Ensure values in names are drawing numbers
     names_vals = list(config["names"].values())
-    assert any("LEVELER" in str(v) or "SCREW" in str(v) for v in names_vals)
+    assert any("HOM" in str(v) or "HRD" in str(v) for v in names_vals)

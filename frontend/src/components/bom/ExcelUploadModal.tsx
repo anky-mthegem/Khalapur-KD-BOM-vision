@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Upload, X, Check, FileSpreadsheet, AlertTriangle, EyeOff, Save, Download, Clipboard } from 'lucide-react';
+import { Upload, X, Check, FileSpreadsheet, AlertTriangle, EyeOff, Save, Download, Clipboard, Trash2 } from 'lucide-react';
 import { api } from '../../services/api';
-import { BomPreviewResponse } from '../../types/bom';
+import { BomPreviewResponse, BomPreviewItem } from '../../types/bom';
 
 interface ExcelUploadModalProps {
   isOpen: boolean;
@@ -19,6 +19,7 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
   const [pastedText, setPastedText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [preview, setPreview] = useState<BomPreviewResponse | null>(null);
+  const [previewItems, setPreviewItems] = useState<BomPreviewItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -32,6 +33,7 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
       try {
         const previewData = await api.uploadBomPreview(selected);
         setPreview(previewData);
+        setPreviewItems(previewData.items || []);
       } catch (err: any) {
         setError(err.message || 'Failed to parse Excel spreadsheet');
       } finally {
@@ -50,6 +52,7 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
     try {
       const previewData = await api.parsePastedBom(pastedText);
       setPreview(previewData);
+      setPreviewItems(previewData.items || []);
     } catch (err: any) {
       setError(err.message || 'Failed to parse pasted BOM data. Ensure rows include Sr No, Item Name, and Qty.');
     } finally {
@@ -57,18 +60,55 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
     }
   };
 
+  const handleDeleteItem = (sr_no: number) => {
+    setPreviewItems(prev => prev.filter(it => it.sr_no !== sr_no));
+    setError(null);
+  };
+
+  const handleDrawingNoChange = (sr_no: number, val: string) => {
+    setPreviewItems(prev => prev.map(it => {
+      if (it.sr_no === sr_no) {
+        const clean = val.trim().toUpperCase();
+        const hasDwg = clean !== "" && clean !== "—" && clean !== "-" && clean !== "NA" && clean !== "N/A";
+        return {
+          ...it,
+          drawing_no: val,
+          part_uid: clean,
+          has_drawing_no: hasDwg
+        };
+      }
+      return it;
+    }));
+    setError(null);
+  };
+
+  // Calculations on current previewItems
+  const missingDwgItems = previewItems.filter(it => {
+    const dwg = (it.drawing_no || "").trim();
+    return !dwg || dwg === "—" || dwg === "-" || dwg === "NA" || dwg === "N/A" || it.has_drawing_no === false;
+  });
+  const hasMissingDwg = missingDwgItems.length > 0;
+  const currentTotalItems = previewItems.length;
+  const currentVisionItems = previewItems.filter(it => it.is_vision_inspected).length;
+  const currentExcludedCount = previewItems.filter(it => !it.is_vision_inspected).length;
+
   const handleCommit = async () => {
-    if (!preview) return;
+    if (!preview || previewItems.length === 0) return;
+    if (hasMissingDwg) {
+      setError(`Cannot save BOM: ${missingDwgItems.length} item(s) are missing a Drawing Number. Please delete these items using the trash icon or enter drawing numbers.`);
+      return;
+    }
     setIsLoading(true);
+    setError(null);
     try {
       await api.commitBom({
         master_item_code: preview.master_item_code,
         description: preview.description,
-        items: preview.items.map((it) => ({
-          sr_no: it.sr_no,
-          part_uid: it.part_uid,
+        items: previewItems.map((it, idx) => ({
+          sr_no: idx + 1,
+          part_uid: it.drawing_no.trim().toUpperCase(),
           item_name: it.item_name,
-          drawing_no: it.drawing_no,
+          drawing_no: it.drawing_no.trim().toUpperCase(),
           target_qty: it.target_qty,
           is_vision_inspected: it.is_vision_inspected,
         })),
@@ -209,6 +249,22 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
           {/* Preview Details */}
           {preview && (
             <div className="space-y-3">
+              {/* Warning Banner if items have missing Drawing Numbers */}
+              {hasMissingDwg && (
+                <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-xs text-amber-900 shadow-sm flex items-start space-x-2.5">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <span className="font-bold text-amber-950 text-sm">
+                      Warning: {missingDwgItems.length} item(s) are missing a Drawing Number!
+                    </span>
+                    <p className="text-amber-800 text-[11px] leading-relaxed">
+                      Every item in the BOM must have a Drawing Number to be registered as a unique class in the YOLO model, database, and conveyor tripwire.
+                      You can <strong>delete items without drawing numbers</strong> using the red trash icon (<Trash2 className="w-3.5 h-3.5 inline text-red-600 mx-0.5" />), or type a Drawing Number directly in the table.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-gray-50 p-3 rounded border border-gray-300 grid grid-cols-2 gap-2 text-xs">
                 <div>
                   <span className="text-gray-500">Master Item Code:</span>{" "}
@@ -221,10 +277,10 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
                   <span className="text-gray-500">Description:</span> <strong>{preview.description}</strong>
                 </div>
                 <div>
-                  <span className="text-gray-500">Total Items:</span> <strong>{preview.total_items}</strong> (Vision Inspected: {preview.vision_items_count})
+                  <span className="text-gray-500">Total Items:</span> <strong>{currentTotalItems}</strong> (Vision Inspected: {currentVisionItems})
                 </div>
                 <div>
-                  <span className="text-gray-500">Auto-Excluded Packaging (Carton):</span> <strong className="text-gray-600">{preview.excluded_packaging_count}</strong>
+                  <span className="text-gray-500">Auto-Excluded Packaging (Carton):</span> <strong className="text-gray-600">{currentExcludedCount}</strong>
                 </div>
               </div>
 
@@ -234,44 +290,85 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
                   <thead className="sticky top-0 bg-[#F3F2F1]">
                     <tr>
                       <th className="w-8 text-center">#</th>
-                      <th>Item Name (Acts as YOLO Label)</th>
-                      <th>Drawing No</th>
-                      <th>Canonical Part UID</th>
+                      <th>Item Name</th>
+                      <th>Drawing No (Unique Key)</th>
                       <th className="w-10 text-center">Qty</th>
                       <th className="w-14 text-center">Vision</th>
                       <th className="w-16 text-center">Status</th>
+                      <th className="w-12 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.items.map((it) => (
-                      <tr key={it.sr_no} className={it.is_vision_inspected ? "bg-white" : "bg-gray-100 text-gray-500 italic"}>
-                        <td className="text-center font-mono">{it.sr_no}</td>
-                        <td className="truncate max-w-xs font-medium">{it.item_name}</td>
-                        <td className="font-mono text-[11px]">{it.drawing_no}</td>
-                        <td className="font-mono text-[11px] text-blue-700">{it.part_uid}</td>
-                        <td className="text-center font-bold font-mono">{it.target_qty}</td>
-                        <td className="text-center">
-                          {it.is_vision_inspected ? (
-                            <span className="text-green-700 font-bold">YES</span>
-                          ) : (
-                            <span className="badge-excluded flex items-center justify-center">
-                              <EyeOff className="w-3 h-3 mr-0.5" /> EXCL
-                            </span>
-                          )}
-                        </td>
-                        <td className="text-center">
-                          {it.is_new_part ? (
-                            <span className="bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded text-[10px]">
-                              NEW
-                            </span>
-                          ) : (
-                            <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[10px]">
-                              {it.training_status}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {previewItems.map((it, idx) => {
+                      const isDwgMissing = !it.drawing_no || it.drawing_no === '—' || it.drawing_no === '-' || it.drawing_no === 'NA' || it.has_drawing_no === false;
+                      return (
+                        <tr
+                          key={it.sr_no || idx}
+                          className={
+                            isDwgMissing
+                              ? "bg-amber-50/80 border-l-2 border-amber-500"
+                              : it.is_vision_inspected
+                              ? "bg-white"
+                              : "bg-gray-100 text-gray-500 italic"
+                          }
+                        >
+                          <td className="text-center font-mono">{idx + 1}</td>
+                          <td className="truncate max-w-xs font-medium">{it.item_name}</td>
+                          <td>
+                            {isDwgMissing ? (
+                              <div className="flex items-center space-x-1">
+                                <input
+                                  type="text"
+                                  value={it.drawing_no === '—' || it.drawing_no === '-' ? '' : it.drawing_no}
+                                  onChange={(e) => handleDrawingNoChange(it.sr_no, e.target.value)}
+                                  placeholder="Enter Drawing No"
+                                  className="w-36 px-1.5 py-0.5 border border-amber-400 bg-white rounded font-mono text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                />
+                                <span className="text-[9px] font-bold bg-amber-200 text-amber-900 px-1 py-0.5 rounded whitespace-nowrap">
+                                  REQUIRED
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="font-mono font-bold text-[11px] text-[#2B579A]">{it.drawing_no}</span>
+                            )}
+                          </td>
+                          <td className="text-center font-bold font-mono">{it.target_qty}</td>
+                          <td className="text-center">
+                            {it.is_vision_inspected ? (
+                              <span className="text-green-700 font-bold">YES</span>
+                            ) : (
+                              <span className="badge-excluded flex items-center justify-center">
+                                <EyeOff className="w-3 h-3 mr-0.5" /> EXCL
+                              </span>
+                            )}
+                          </td>
+                          <td className="text-center">
+                            {isDwgMissing ? (
+                              <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[10px]">
+                                NO DWG
+                              </span>
+                            ) : it.is_new_part ? (
+                              <span className="bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded text-[10px]">
+                                NEW
+                              </span>
+                            ) : (
+                              <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[10px]">
+                                {it.training_status}
+                              </span>
+                            )}
+                          </td>
+                          <td className="text-center">
+                            <button
+                              onClick={() => handleDeleteItem(it.sr_no)}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-100 p-1 rounded transition"
+                              title={isDwgMissing ? "Delete item with missing drawing number from BOM" : "Delete item from BOM"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5 inline" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -280,23 +377,38 @@ export const ExcelUploadModal: React.FC<ExcelUploadModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-100 p-3 px-4 border-t border-gray-300 flex justify-end space-x-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 border border-gray-400 bg-white rounded text-xs font-semibold text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          {preview && (
+        <div className="bg-gray-100 p-3 px-4 border-t border-gray-300 flex justify-between items-center">
+          <div className="text-xs">
+            {hasMissingDwg && (
+              <span className="text-red-600 font-semibold flex items-center space-x-1">
+                <AlertTriangle className="w-3.5 h-3.5 inline mr-1 text-red-500" />
+                <span>Delete or fix {missingDwgItems.length} item(s) without drawing number before saving</span>
+              </span>
+            )}
+          </div>
+          <div className="flex space-x-2">
             <button
-              onClick={handleCommit}
-              disabled={isLoading}
-              className="px-4 py-1.5 bg-[#107C41] hover:bg-[#0E6A38] text-white rounded text-xs font-bold flex items-center space-x-1.5 shadow"
+              onClick={onClose}
+              className="px-3 py-1.5 border border-gray-400 bg-white rounded text-xs font-semibold text-gray-700 hover:bg-gray-50"
             >
-              <Save className="w-4 h-4" />
-              <span>Save & Register BOM Recipe</span>
+              Cancel
             </button>
-          )}
+            {preview && (
+              <button
+                onClick={handleCommit}
+                disabled={isLoading || hasMissingDwg || previewItems.length === 0}
+                className={`px-4 py-1.5 rounded text-xs font-bold flex items-center space-x-1.5 shadow transition ${
+                  hasMissingDwg || previewItems.length === 0
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                    : 'bg-[#107C41] hover:bg-[#0E6A38] text-white'
+                }`}
+                title={hasMissingDwg ? "Please delete items with missing drawing numbers or provide drawing numbers first" : "Save & Register BOM Recipe"}
+              >
+                <Save className="w-4 h-4" />
+                <span>Save & Register BOM Recipe</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

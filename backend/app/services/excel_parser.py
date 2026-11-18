@@ -36,7 +36,7 @@ def normalize_drawing_no(dwg: Optional[str]) -> Tuple[Optional[str], bool]:
     if not dwg:
         return None, False
     dwg_clean = str(dwg).strip()
-    invalid_tokens = ["—", "–", "-", "NA", "N/A", "NONE", "BLANK", "N.A.", "N.A", "."]
+    invalid_tokens = ["—", "–", "-", "NA", "N/A", "NONE", "BLANK", "N.A.", "N.A", ".", "NULL", "NO"]
     if dwg_clean.upper() in invalid_tokens or not dwg_clean:
         return None, False
     return dwg_clean.upper(), True
@@ -214,9 +214,11 @@ class PlantExcelBomParser:
             if is_valid_dwg and dwg_clean:
                 part_uid = dwg_clean
                 drawing_no = dwg_clean
+                has_drawing_no = True
             else:
-                part_uid = generate_part_uid_slug(name_str)
-                drawing_no = "—"
+                part_uid = ""
+                drawing_no = ""
+                has_drawing_no = False
 
             is_packaging = is_packaging_item(name_str)
             is_vision_inspected = not is_packaging
@@ -226,12 +228,14 @@ class PlantExcelBomParser:
                 "part_uid": part_uid,
                 "item_name": name_str,
                 "drawing_no": drawing_no,
+                "has_drawing_no": has_drawing_no,
                 "target_qty": target_qty,
                 "is_vision_inspected": is_vision_inspected
             })
 
         total_items = len(items)
         vision_count = sum(1 for it in items if it["is_vision_inspected"])
+        missing_dwg_count = sum(1 for it in items if not it["has_drawing_no"])
 
         return {
             "master_item_code": master_item_code,
@@ -239,6 +243,7 @@ class PlantExcelBomParser:
             "sheet_name": sheet.title,
             "total_items": total_items,
             "vision_items_count": vision_count,
+            "missing_dwg_count": missing_dwg_count,
             "items": items
         }
 
@@ -356,9 +361,11 @@ class PlantExcelBomParser:
             if is_valid_dwg and dwg_clean:
                 part_uid = dwg_clean
                 drawing_no = dwg_clean
+                has_drawing_no = True
             else:
-                part_uid = generate_part_uid_slug(name_val)
-                drawing_no = "—"
+                part_uid = ""
+                drawing_no = ""
+                has_drawing_no = False
 
             is_packaging = is_packaging_item(name_val)
             is_vision_inspected = not is_packaging
@@ -368,12 +375,14 @@ class PlantExcelBomParser:
                 "part_uid": part_uid,
                 "item_name": name_val,
                 "drawing_no": drawing_no,
+                "has_drawing_no": has_drawing_no,
                 "target_qty": target_qty,
                 "is_vision_inspected": is_vision_inspected
             })
 
         total_items = len(items)
         vision_count = sum(1 for it in items if it["is_vision_inspected"])
+        missing_dwg_count = sum(1 for it in items if not it["has_drawing_no"])
 
         return {
             "master_item_code": master_item_code,
@@ -381,6 +390,7 @@ class PlantExcelBomParser:
             "sheet_name": source_name,
             "total_items": total_items,
             "vision_items_count": vision_count,
+            "missing_dwg_count": missing_dwg_count,
             "items": items
         }
 
