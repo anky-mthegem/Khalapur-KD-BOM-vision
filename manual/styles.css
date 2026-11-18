@@ -406,6 +406,117 @@ li {
   background: #1E3E6D;
 }
 
+/* Engineering Sign-off & Credits */
+.heart-icon {
+  color: #E25555;
+  display: inline-block;
+  font-style: normal;
+  margin: 0 2px;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+.sop-pill-credit {
+  background: rgba(226, 85, 85, 0.25) !important;
+  border-color: rgba(226, 85, 85, 0.5) !important;
+}
+
+.sidebar-credit-box {
+  margin-top: auto;
+  padding: 12px;
+  background: #FFFFFF;
+  border: 1px solid var(--office-border);
+  border-radius: 6px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.credit-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #605E5C;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.credit-author {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--office-blue);
+  margin: 4px 0 2px 0;
+}
+
+.credit-sub {
+  font-size: 10px;
+  color: #8A8886;
+}
+
+.signoff-card {
+  background: #FFFFFF;
+  border: 1px solid var(--office-border);
+  border-left: 4px solid var(--office-blue);
+  border-radius: 6px;
+  padding: 18px 24px;
+  margin-top: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.signoff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #EDEBE9;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.signoff-header h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--office-blue);
+  margin: 0;
+}
+
+.signoff-badge {
+  font-size: 11px;
+  font-weight: 600;
+  background: #EFF6FC;
+  color: var(--office-blue);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #C7E0F4;
+}
+
+.signoff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.signoff-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.signoff-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #605E5C;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.signoff-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #201F1E;
+}
+
 /* Print Styles */
 @media print {
   .sop-header {

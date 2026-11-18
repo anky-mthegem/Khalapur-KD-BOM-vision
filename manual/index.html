@@ -26,6 +26,7 @@
       <div class="sop-pill">REV: <strong>2.6.0-OBB</strong></div>
       <div class="sop-pill">STATUS: <strong>RELEASED (ACTIVE)</strong></div>
       <div class="sop-pill">GATE: <strong>100% MATCH MANDATORY</strong></div>
+      <div class="sop-pill sop-pill-credit">AUTHOR: <strong>Made By <span class="heart-icon">&#10084;&#65039;</span> By Aman</strong></div>
     </div>
   </header>
 
@@ -55,7 +56,15 @@
         <li class="nav-item" data-target="sec-tripwire-calib"><a href="#sec-tripwire-calib">8. Tripwire Calibration</a></li>
         <li class="nav-item" data-target="sec-troubleshooting"><a href="#sec-troubleshooting">9. Troubleshooting Matrix</a></li>
         <li class="nav-item" data-target="sec-checklist"><a href="#sec-checklist">10. Shift Handover Checklist</a></li>
+        <li class="nav-item" data-target="sec-credits"><a href="#sec-credits">11. Engineering Sign-Off</a></li>
       </ul>
+
+      <!-- Sidebar Author Credit Box -->
+      <div class="sidebar-credit-box">
+        <div class="credit-label">VISION QC AUTOMATION</div>
+        <div class="credit-author">Made By <span class="heart-icon">&#10084;&#65039;</span> By Aman</div>
+        <div class="credit-sub">Khalapur Plant Line 1</div>
+      </div>
     </aside>
 
     <!-- Main Content Document -->
@@ -571,6 +580,39 @@
           <button onclick="resetChecklist()" style="padding: 6px 12px; font-size: 11px; background:#EDEBE9; border:1px solid #D2D0CE; border-radius:4px; cursor:pointer;">
             Reset Shift Checklist
           </button>
+        </div>
+      </section>
+
+      <!-- Section 11: Engineering Sign-Off & System Credits -->
+      <section id="sec-credits" class="sop-section" data-roles="all">
+        <h2>11. Engineering Sign-Off & System Credits</h2>
+        <p>
+          This automated computer vision and tripwire verification system was architected, implemented, and calibrated specifically for the <strong>Khalapur Knock-Down (KD) Furniture Packaging Facility</strong>.
+        </p>
+
+        <div class="signoff-card">
+          <div class="signoff-header">
+            <h3>Industrial AI Vision Inspector &bull; Automation Core</h3>
+            <span class="signoff-badge">Plant Line 1 (Khalapur)</span>
+          </div>
+          <div class="signoff-grid">
+            <div class="signoff-item">
+              <span class="signoff-label">System Architect & Developer</span>
+              <span class="signoff-value">Made By <span class="heart-icon">&#10084;&#65039;</span> By Aman</span>
+            </div>
+            <div class="signoff-item">
+              <span class="signoff-label">Target Facility</span>
+              <span class="signoff-value">Khalapur Knock-Down (KD) Furniture Unit</span>
+            </div>
+            <div class="signoff-item">
+              <span class="signoff-label">Vision & Tracking Core</span>
+              <span class="signoff-value">YOLO26-OBB + ByteTrack Hybrid Conveyor QC</span>
+            </div>
+            <div class="signoff-item">
+              <span class="signoff-label">QC Interlock Policy</span>
+              <span class="signoff-value">100% Strict BOM Match Mandatory Gate</span>
+            </div>
+          </div>
         </div>
       </section>
 

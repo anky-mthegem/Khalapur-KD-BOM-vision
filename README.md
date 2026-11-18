@@ -126,3 +126,11 @@ khalapur-kd-bom-vision/
 ├── GEMINI.md                   # Project architectural & UI rules
 └── IMPLEMENTATION_PLAN.md      # Detailed engineering specification
 ```
+
+---
+
+## Author & Engineering Credits
+
+Made By ❤️ By Aman  
+*Industrial Vision & Automation Engineering | Khalapur KD Plant*
+
