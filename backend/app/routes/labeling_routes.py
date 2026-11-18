@@ -24,6 +24,7 @@ class ContourProposalRequest(BaseModel):
     blur_kernel: int = 5
     min_area: int = 300
     max_area: int = 50000
+    image_base64: Optional[str] = None
 
 class SaveAnnotationsRequest(BaseModel):
     annotations: List[Dict[str, Any]]
@@ -41,15 +42,15 @@ class SaveComponentRequest(BaseModel):
 async def upload_image_file(file: UploadFile = File(...)):
     """
     Accepts an uploaded component image (from user's Browse button),
-    decodes it, runs auto-contour proposals, and returns base64 and proposals.
+    decodes it, and returns base64 and dimensions.
+    Starts with clean empty proposals so the operator can draw boxes manually
+    or click 'Auto Box' on demand.
     """
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if image is None:
         raise HTTPException(status_code=400, detail="Invalid image file or format.")
-
-    proposals = auto_labeler.auto_segment_contours(image)
 
     ret, buffer = cv2.imencode(".jpg", image)
     b64_img = base64.b64encode(buffer).decode("utf-8")
@@ -59,7 +60,7 @@ async def upload_image_file(file: UploadFile = File(...)):
         "image_base64": f"data:image/jpeg;base64,{b64_img}",
         "width": image.shape[1],
         "height": image.shape[0],
-        "proposals": proposals
+        "proposals": []
     }
 
 @router.post("/save-component")
@@ -166,13 +167,27 @@ async def capture_current_frame():
 
 @router.post("/auto-annotate")
 async def generate_proposals(params: ContourProposalRequest):
-    """Re-runs OpenCV adaptive contour analysis with customized slider parameters."""
-    frame = camera_service.get_latest_frame()
-    if frame is None:
-        raise HTTPException(status_code=503, detail="Camera frame not available.")
+    """Re-runs OpenCV adaptive contour analysis on uploaded image or camera frame."""
+    image = None
+    if params.image_base64:
+        b64_data = params.image_base64
+        if "," in b64_data:
+            b64_data = b64_data.split(",", 1)[1]
+        try:
+            img_bytes = base64.b64decode(b64_data)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to decode base64 image: {e}")
+
+    if image is None:
+        image = camera_service.get_latest_frame()
+
+    if image is None:
+        raise HTTPException(status_code=503, detail="No active image or camera frame available for auto-contour.")
 
     proposals = auto_labeler.auto_segment_contours(
-        image=frame,
+        image=image,
         threshold_val=params.threshold_val,
         blur_kernel=params.blur_kernel,
         min_area=params.min_area,

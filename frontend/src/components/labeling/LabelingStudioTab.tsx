@@ -91,6 +91,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [canvasDisplaySize, setCanvasDisplaySize] = useState<{ width: number; height: number }>({ width: 720, height: 480 });
 
   // 2. Image Queue State (Batch Filmstrip)
   const [imageQueue, setImageQueue] = useState<ImageQueueItem[]>([]);
@@ -209,6 +210,32 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   }, [availableItems, selectedItemName]);
 
+  // Calculate responsive fit scale so image fits 100% within viewport container
+  const fitImageToContainer = useCallback(() => {
+    if (!imageObjRef.current || !viewportContainerRef.current) return;
+    const container = viewportContainerRef.current;
+    const paddingX = 48;
+    const paddingY = 64; // account for top floating zoom control pill
+    const availW = Math.max(200, container.clientWidth - paddingX);
+    const availH = Math.max(200, container.clientHeight - paddingY);
+
+    const imgW = imageObjRef.current.width || 800;
+    const imgH = imageObjRef.current.height || 600;
+
+    const scale = Math.min(availW / imgW, availH / imgH);
+    const dispW = Math.max(100, Math.round(imgW * scale));
+    const dispH = Math.max(100, Math.round(imgH * scale));
+
+    setCanvasDisplaySize({ width: dispW, height: dispH });
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Reset Zoom and Fit to Screen
+  const resetZoomAndPan = useCallback(() => {
+    fitImageToContainer();
+  }, [fitImageToContainer]);
+
   // Load Active Image onto Canvas
   useEffect(() => {
     if (!currentImage) {
@@ -224,20 +251,42 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
       imageObjRef.current = img;
       setRegions(currentImage.regions || []);
       setSelectedRegionId(null);
-      // Center & fit image
-      resetZoomAndPan();
+      // Center & fit image completely to viewport
+      fitImageToContainer();
     };
-  }, [currentImageIndex, imageQueue.length]);
+  }, [currentImageIndex, imageQueue.length, fitImageToContainer]);
+
+  // Sync active image regions to queue
+  useEffect(() => {
+    if (imageQueue[currentImageIndex]) {
+      imageQueue[currentImageIndex].regions = regions;
+    }
+  }, [regions, currentImageIndex]);
+
+  // Window resize observer to keep canvas scaled to container
+  useEffect(() => {
+    const handleResize = () => {
+      if (imageObjRef.current) {
+        fitImageToContainer();
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [fitImageToContainer]);
 
   // Redraw Canvas whenever regions, draft, selected box, zoom, or pan changes
   useEffect(() => {
     drawCanvas();
   }, [regions, draftRect, selectedRegionId, zoom, pan]);
 
-  // Reset Zoom and Fit to Screen
-  const resetZoomAndPan = () => {
-    setZoom(1.0);
-    setPan({ x: 0, y: 0 });
+  // Mouse wheel zoom in / out centered on canvas
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.88;
+    setZoom((prevZoom) => {
+      const next = Math.max(0.25, Math.min(6.0, prevZoom * zoomFactor));
+      return parseFloat(next.toFixed(2));
+    });
   };
 
   // 1. Image File Upload (Browse button - Supports multiple images)
@@ -254,30 +303,9 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
       try {
         const res = await api.uploadComponentImage(file);
         
-        // Convert any backend contour proposals into regions with the active label
-        const initialRegions: AnnotationRegion[] = (res.proposals || []).map((b: any, idx: number) => {
-          const poly = b.polygon || [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
-          const xs = poly.map((p: number[]) => p[0]);
-          const ys = poly.map((p: number[]) => p[1]);
-          const minX = Math.min(...xs);
-          const minY = Math.min(...ys);
-          const maxX = Math.max(...xs);
-          const maxY = Math.max(...ys);
-          return {
-            id: `reg_${Date.now()}_${idx}`,
-            item_name: selectedItemName || 'COMPONENT',
-            part_uid: selectedDrawingNo || selectedItemName,
-            drawing_no: selectedDrawingNo,
-            color: getLabelColor(activeLabelIndex),
-            x: minX,
-            y: minY,
-            width: maxX - minX,
-            height: maxY - minY,
-            angle: b.angle || 0,
-            polygon: poly,
-            is_visible: true
-          };
-        });
+        // Start with a clean canvas (no phantom auto-boxes).
+        // User can manually draw boxes with BBox tool or click "Auto Box" on demand.
+        const initialRegions: AnnotationRegion[] = [];
 
         newQueueItems.push({
           id: `img_${Date.now()}_${i}`,
@@ -296,7 +324,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
       setCurrentImageIndex(imageQueue.length); // Jump to first newly added image
       setNotification({
         type: 'success',
-        message: `Loaded ${newQueueItems.length} image(s) into labeling queue. Select a label and draw boxes.`
+        message: `Loaded ${newQueueItems.length} image(s). Ready for labeling: select a BOM label above and draw boxes.`
       });
     } else {
       setNotification({ type: 'error', message: 'Failed to read selected image file(s).' });
@@ -312,29 +340,8 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     setNotification(null);
     try {
       const data = await api.captureFrame();
-      const initialRegions: AnnotationRegion[] = (data.proposals || []).map((b: any, idx: number) => {
-        const poly = b.polygon || [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
-        const xs = poly.map((p: number[]) => p[0]);
-        const ys = poly.map((p: number[]) => p[1]);
-        const minX = Math.min(...xs);
-        const minY = Math.min(...ys);
-        const maxX = Math.max(...xs);
-        const maxY = Math.max(...ys);
-        return {
-          id: `reg_cam_${Date.now()}_${idx}`,
-          item_name: selectedItemName || 'COMPONENT',
-          part_uid: selectedDrawingNo || selectedItemName,
-          drawing_no: selectedDrawingNo,
-          color: getLabelColor(activeLabelIndex),
-          x: minX,
-          y: minY,
-          width: maxX - minX,
-          height: maxY - minY,
-          angle: b.angle || 0,
-          polygon: poly,
-          is_visible: true
-        };
-      });
+      // Start with a clean canvas so operator can draw or click "Auto Box"
+      const initialRegions: AnnotationRegion[] = [];
 
       const newItem: ImageQueueItem = {
         id: `img_cam_${Date.now()}`,
@@ -345,7 +352,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
 
       setImageQueue((prev) => [...prev, newItem]);
       setCurrentImageIndex(imageQueue.length);
-      setNotification({ type: 'success', message: 'Live camera frame added to annotation queue.' });
+      setNotification({ type: 'success', message: 'Live camera frame captured. Select a BOM label and draw boxes.' });
     } catch (e: any) {
       setNotification({ type: 'error', message: 'Camera frame capture failed: ' + e.message });
     } finally {
@@ -800,12 +807,13 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // 8. Auto-Detect Fastener Contours (OpenCV)
+  // 8. Auto-Detect Fastener Contours (OpenCV on Demand)
   const handleAutoContours = async () => {
     if (!currentImage) return;
     setIsProcessing(true);
+    setNotification(null);
     try {
-      const data = await api.autoAnnotate(60, 5, 200, 50000);
+      const data = await api.autoAnnotate(60, 5, 200, 50000, currentImage.base64);
       const newRegions: AnnotationRegion[] = (data.proposals || []).map((b: any, idx: number) => {
         const poly = b.polygon || [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
         const xs = poly.map((p: number[]) => p[0]);
@@ -830,8 +838,12 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
         };
       });
 
-      setRegions((prev) => [...prev, ...newRegions]);
-      setNotification({ type: 'success', message: `OpenCV detected ${newRegions.length} component proposal(s).` });
+      if (newRegions.length > 0) {
+        setRegions((prev) => [...prev, ...newRegions]);
+        setNotification({ type: 'success', message: `OpenCV detected and added ${newRegions.length} component proposal(s).` });
+      } else {
+        setNotification({ type: 'info', message: 'No component contours found. Use BBox tool (R) to draw boxes manually.' });
+      }
     } catch (e: any) {
       setNotification({ type: 'error', message: 'Auto-contour failed: ' + e.message });
     } finally {
@@ -1143,9 +1155,9 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
           {/* Canvas Floating Top Controls: Zoom, Pan, Fit */}
           <div className="absolute top-3 left-3 z-20 flex items-center space-x-1 bg-black/75 backdrop-blur-sm p-1 rounded border border-gray-700 shadow-md">
             <button
-              onClick={() => setZoom((z) => Math.min(5.0, z + 0.25))}
+              onClick={() => setZoom((z) => Math.min(6.0, parseFloat((z + 0.25).toFixed(2))))}
               className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded"
-              title="Zoom In"
+              title="Zoom In (or Scroll Wheel Up)"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
@@ -1153,23 +1165,26 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
               {Math.round(zoom * 100)}%
             </span>
             <button
-              onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}
+              onClick={() => setZoom((z) => Math.max(0.25, parseFloat((z - 0.25).toFixed(2))))}
               className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded"
-              title="Zoom Out"
+              title="Zoom Out (or Scroll Wheel Down)"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
             <button
               onClick={resetZoomAndPan}
               className="px-2 py-0.5 text-[11px] font-semibold text-gray-300 hover:text-white hover:bg-gray-700 rounded"
-              title="Reset Zoom to Fit"
+              title="Fit entire image to screen"
             >
               Fit
             </button>
           </div>
 
-          {/* Interactive Canvas Canvas Area */}
-          <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+          {/* Interactive Canvas Area */}
+          <div
+            onWheel={handleWheel}
+            className="flex-1 flex items-center justify-center p-4 relative overflow-hidden"
+          >
             {currentImage ? (
               <div
                 style={{
@@ -1177,7 +1192,13 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
                   transformOrigin: 'center center',
                   transition: isPanning ? 'none' : 'transform 0.05s ease-out'
                 }}
-                className="relative flex items-center justify-center cursor-crosshair shadow-2xl"
+                className={`relative flex items-center justify-center shadow-2xl ${
+                  activeTool === 'rect' || activeTool === 'obb'
+                    ? 'cursor-crosshair'
+                    : activeTool === 'pan'
+                    ? isPanning ? 'cursor-grabbing' : 'cursor-grab'
+                    : 'cursor-default'
+                }`}
               >
                 <canvas
                   ref={canvasRef}
@@ -1185,7 +1206,11 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
                   onMouseLeave={handleMouseUp}
-                  className="rounded border border-gray-600 bg-black block"
+                  style={{
+                    width: `${canvasDisplaySize.width}px`,
+                    height: `${canvasDisplaySize.height}px`,
+                  }}
+                  className="rounded border border-gray-600 bg-black block shadow-2xl"
                 />
               </div>
             ) : (

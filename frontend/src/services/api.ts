@@ -190,7 +190,7 @@ export const api = {
     return res.json();
   },
 
-  async autoAnnotate(thresholdVal: number, blurKernel: number, minArea: number, maxArea: number): Promise<any> {
+  async autoAnnotate(thresholdVal: number, blurKernel: number, minArea: number, maxArea: number, imageBase64?: string): Promise<any> {
     const res = await fetch(`${API_BASE}/labeling/auto-annotate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -199,6 +199,7 @@ export const api = {
         blur_kernel: blurKernel,
         min_area: minArea,
         max_area: maxArea,
+        image_base64: imageBase64
       }),
     });
     if (!res.ok) throw new Error(await res.text());
