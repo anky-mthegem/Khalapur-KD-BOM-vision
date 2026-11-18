@@ -1,7 +1,10 @@
 """
 YOLO26-OBB Inference & ByteTrack Object Tracking Service.
-Runs native end-to-end OBB inference (nms=False) and tracks hardware fasteners
-across video frames with persistent track_ids.
+Hybrid pipeline:
+  1. Production Mode: Runs Ultralytics native ByteTrack (model.track(source=frame, persist=True, tracker="bytetrack.yaml"))
+     with 8-state Kalman Filter motion prediction and 2-stage low-confidence detection association.
+  2. Fallback Mode: OpenCV adaptive contour OBB + SimpleTracker Euclidean centroid matching when model weights
+     are not yet trained.
 """
 import cv2
 import time
@@ -9,14 +12,14 @@ import math
 import threading
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from backend.app.config import settings, WEIGHTS_DIR
 from backend.app.database import SyncSessionLocal
 from backend.app.models.parts import PartsCatalog
 
 class SimpleTracker:
     """
-    Centroid & Rotated-IoU multi-object tracker for conveyor tracking.
+    Centroid & Euclidean distance multi-object tracker for fallback conveyor tracking.
     Assigns persistent integer track_ids to objects moving along the conveyor belt.
     """
     def __init__(self, max_disappeared: int = 25, distance_threshold: float = 65.0):
@@ -128,7 +131,10 @@ class VisionEngine:
                 cls._instance.model = None
                 cls._instance.model_path = None
                 cls._instance.tracker = SimpleTracker()
+                cls._instance.track_history: Dict[int, Tuple[float, float]] = {}
+                cls._instance.track_disappeared: Dict[int, int] = {}
                 cls._instance.classes_map: Dict[int, str] = {}
+                cls._instance.names_map: Dict[str, str] = {}
                 cls._instance.load_classes_from_db()
                 cls._instance.init_model(settings.active_model_name)
             return cls._instance
@@ -147,10 +153,11 @@ class VisionEngine:
         self.load_classes_from_db()
         target_path = WEIGHTS_DIR / model_name
         self.model_path = target_path
+        self.reset_tracking()
         try:
             from ultralytics import YOLO
             if target_path.exists():
-                print(f"[VisionEngine] Loading weights from {target_path}")
+                print(f"[VisionEngine] Loading weights from {target_path} for Ultralytics ByteTrack inference.")
                 self.model = YOLO(str(target_path))
             else:
                 print(f"[VisionEngine] Weights not yet on disk ({target_path.name}), using dynamic contour fallback/simulator until trained.")
@@ -163,52 +170,152 @@ class VisionEngine:
         with self._lock:
             self.init_model(new_weights_path.name)
 
+    def reset_tracking(self):
+        """Resets both Ultralytics ByteTrack trajectory history and SimpleTracker state."""
+        with self._lock:
+            self.track_history.clear()
+            self.track_disappeared.clear()
+            self.tracker = SimpleTracker()
+
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
         """
-        Executes OBB inference, tracks objects, and returns (annotated_frame, tracked_objects).
+        Executes OBB inference & tracking, returning (annotated_frame, tracked_objects).
+        HYBRID PIPELINE:
+          1. Production Mode: When model weights exist, runs Ultralytics native ByteTrack
+             (model.track(source=frame, persist=True, tracker="bytetrack.yaml")) with
+             8-state Kalman Filter motion prediction and 2-stage low-confidence association.
+          2. Fallback Mode: When model weights are not loaded (e.g. before initial recipe training),
+             uses OpenCV adaptive contour detection + SimpleTracker Euclidean centroid matching.
         """
-        raw_detections = self._detect(frame)
-        tracked_objects = self.tracker.update(raw_detections)
+        tracked_objects: Optional[List[Dict[str, Any]]] = None
+
+        # 1. Primary: Ultralytics Native ByteTrack
+        if self.model is not None:
+            tracked_objects = self._track_with_ultralytics(frame)
+
+        # 2. Fallback: Dynamic Optical Contours + SimpleTracker
+        if tracked_objects is None:
+            raw_detections = self._detect_contours(frame)
+            tracked_objects = self.tracker.update(raw_detections)
+
+        # 3. Render visual annotations and motion trails
         annotated_frame = self._render_annotations(frame, tracked_objects)
         return annotated_frame, tracked_objects
 
-    def _detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    def _track_with_ultralytics(self, frame: np.ndarray) -> Optional[List[Dict[str, Any]]]:
+        """
+        Runs Ultralytics native ByteTrack object tracking on the input frame.
+        Supports both YOLO-OBB (Oriented Bounding Boxes) and standard YOLO bounding boxes.
+        Returns tracked objects with persistent track_id, (prev_centroid, curr_centroid),
+        oriented bounding box polygon, part_uid, item_name, and confidence.
+        """
+        if self.model is None:
+            return None
+
+        try:
+            results = self.model.track(
+                source=frame,
+                persist=True,
+                tracker="bytetrack.yaml",
+                conf=settings.conf_threshold,
+                imgsz=settings.imgsz,
+                verbose=False
+            )
+
+            if not results or len(results) == 0:
+                return []
+
+            res = results[0]
+            tracked_objects: List[Dict[str, Any]] = []
+            active_track_ids: Set[int] = set()
+
+            # Case A: Oriented Bounding Boxes (YOLO26-OBB / YOLO11-OBB)
+            if res.obb is not None and len(res.obb) > 0:
+                obb_data = res.obb
+                polygons = obb_data.xyxyxyxy.cpu().numpy()  # Shape: (N, 4, 2)
+                classes = obb_data.cls.cpu().numpy().astype(int)
+                confs = obb_data.conf.cpu().numpy()
+                track_ids = obb_data.id.int().cpu().tolist() if obb_data.id is not None else None
+
+                for i, (poly, cls_id, conf) in enumerate(zip(polygons, classes, confs)):
+                    tid = int(track_ids[i]) if (track_ids is not None and i < len(track_ids)) else (i + 1)
+                    active_track_ids.add(tid)
+
+                    curr_centroid = (float(poly[:, 0].mean()), float(poly[:, 1].mean()))
+                    prev_centroid = self.track_history.get(tid, curr_centroid)
+                    self.track_history[tid] = curr_centroid
+
+                    part_uid = self.classes_map.get(int(cls_id), f"CLASS_{cls_id}")
+                    item_name = self.names_map.get(part_uid, part_uid)
+
+                    tracked_objects.append({
+                        "track_id": tid,
+                        "centroid": curr_centroid,
+                        "prev_centroid": prev_centroid,
+                        "obb": poly.tolist(),
+                        "class_id": int(cls_id),
+                        "part_uid": part_uid,
+                        "item_name": item_name,
+                        "confidence": float(conf)
+                    })
+
+            # Case B: Standard Axis-Aligned Bounding Boxes
+            elif res.boxes is not None and len(res.boxes) > 0:
+                boxes_data = res.boxes
+                xyxy = boxes_data.xyxy.cpu().numpy()  # Shape: (N, 4)
+                classes = boxes_data.cls.cpu().numpy().astype(int)
+                confs = boxes_data.conf.cpu().numpy()
+                track_ids = boxes_data.id.int().cpu().tolist() if boxes_data.id is not None else None
+
+                for i, (box, cls_id, conf) in enumerate(zip(xyxy, classes, confs)):
+                    tid = int(track_ids[i]) if (track_ids is not None and i < len(track_ids)) else (i + 1)
+                    active_track_ids.add(tid)
+
+                    x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+                    curr_centroid = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+                    prev_centroid = self.track_history.get(tid, curr_centroid)
+                    self.track_history[tid] = curr_centroid
+
+                    poly = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+                    part_uid = self.classes_map.get(int(cls_id), f"CLASS_{cls_id}")
+                    item_name = self.names_map.get(part_uid, part_uid)
+
+                    tracked_objects.append({
+                        "track_id": tid,
+                        "centroid": curr_centroid,
+                        "prev_centroid": prev_centroid,
+                        "obb": poly,
+                        "class_id": int(cls_id),
+                        "part_uid": part_uid,
+                        "item_name": item_name,
+                        "confidence": float(conf)
+                    })
+
+            # Prune old vanished track IDs from memory
+            self._prune_track_history(active_track_ids)
+            return tracked_objects
+
+        except Exception as e:
+            print(f"[VisionEngine] Ultralytics ByteTrack notice: {e}, falling back to contour tracker.")
+            return None
+
+    def _prune_track_history(self, active_track_ids: Set[int]):
+        """Cleans up inactive track IDs from history to prevent memory leaks during long conveyor runs."""
+        for tid in list(self.track_history.keys()):
+            if tid not in active_track_ids:
+                self.track_disappeared[tid] = self.track_disappeared.get(tid, 0) + 1
+                if self.track_disappeared[tid] > 60:  # ~2 seconds after exiting viewport
+                    self.track_history.pop(tid, None)
+                    self.track_disappeared.pop(tid, None)
+            else:
+                self.track_disappeared[tid] = 0
+
+    def _detect_contours(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Dynamic Optical Fallback (OpenCV adaptive contour OBB) for offline testing,
+        initial system setup, or mock camera feeds before a model is trained.
+        """
         detections: List[Dict[str, Any]] = []
-
-        # 1. Use Ultralytics model if weights are available
-        if self.model is not None:
-            try:
-                # YOLO26-OBB native end-to-end inference (nms=False)
-                results = self.model.predict(
-                    source=frame,
-                    conf=settings.conf_threshold,
-                    imgsz=settings.imgsz,
-                    verbose=False
-                )
-                if results and len(results) > 0 and results[0].obb is not None:
-                    obb_data = results[0].obb
-                    # obb.xyxyxyxy has shape (N, 4, 2)
-                    polygons = obb_data.xyxyxyxy.cpu().numpy()
-                    classes = obb_data.cls.cpu().numpy().astype(int)
-                    confs = obb_data.conf.cpu().numpy()
-
-                    for poly, cls_id, conf in zip(polygons, classes, confs):
-                        centroid = (float(poly[:, 0].mean()), float(poly[:, 1].mean()))
-                        part_uid = self.classes_map.get(cls_id, f"CLASS_{cls_id}")
-                        item_name = self.names_map.get(part_uid, part_uid)
-                        detections.append({
-                            "obb": poly.tolist(),
-                            "centroid": centroid,
-                            "class_id": int(cls_id),
-                            "part_uid": part_uid,
-                            "item_name": item_name,
-                            "confidence": float(conf)
-                        })
-                    return detections
-            except Exception as e:
-                pass  # Fall through to contour detection
-
-        # 2. Dynamic Optical Fallback (OpenCV adaptive contour OBB) for offline testing / mock video
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (5, 5), 0)
         _, thresh = cv2.threshold(blur, 60, 255, cv2.THRESH_BINARY)
@@ -240,6 +347,10 @@ class VisionEngine:
 
         return detections
 
+    def _detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Backward compatibility alias."""
+        return self._detect_contours(frame)
+
     def _render_annotations(self, frame: np.ndarray, tracked_objects: List[Dict[str, Any]]) -> np.ndarray:
         vis = frame.copy()
         for obj in tracked_objects:
@@ -247,6 +358,13 @@ class VisionEngine:
             cv2.polylines(vis, [box], True, (0, 255, 128), 2)
             cx, cy = int(obj["centroid"][0]), int(obj["centroid"][1])
             cv2.circle(vis, (cx, cy), 4, (0, 255, 255), -1)
+
+            # Motion velocity trail (draw line from prev_centroid to curr_centroid)
+            prev_c = obj.get("prev_centroid")
+            if prev_c:
+                px, py = int(prev_c[0]), int(prev_c[1])
+                if abs(cx - px) > 1 or abs(cy - py) > 1:
+                    cv2.line(vis, (px, py), (cx, cy), (0, 200, 255), 2)
 
             # Label banner
             label = f"#{obj['track_id']} {obj['part_uid']} ({int(obj['confidence']*100)}%)"
