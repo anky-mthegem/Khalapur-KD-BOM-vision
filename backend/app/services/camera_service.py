@@ -25,6 +25,7 @@ class OpenCVCamera(BaseCamera):
     automatic reconnection attempts, and an industrial diagnostic fallback overlay.
     """
     def __init__(self, source: Any, width: int = 1280, height: int = 720):
+        self._lock = threading.Lock()
         self.raw_source = source
         self.width = width
         self.height = height
@@ -46,7 +47,8 @@ class OpenCVCamera(BaseCamera):
         elif isinstance(self.source, str) and not self.source.startswith("rtsp://") and not self.source.startswith("http://"):
             self.is_video_file = True
 
-        self._open_capture()
+        with self._lock:
+            self._open_capture()
 
     def _open_capture(self):
         try:
@@ -54,7 +56,7 @@ class OpenCVCamera(BaseCamera):
                 # DirectShow on Windows gives instantaneous camera capture without MSMF delay
                 backend = cv2.CAP_DSHOW if platform.system() == "Windows" else cv2.CAP_ANY
                 self.cap = cv2.VideoCapture(self.source, backend)
-                if not self.cap.isOpened() and backend != cv2.CAP_ANY:
+                if not self.cap.isOpened() and platform.system() != "Windows":
                     self.cap = cv2.VideoCapture(self.source)
 
                 if self.cap and self.cap.isOpened():
@@ -83,21 +85,22 @@ class OpenCVCamera(BaseCamera):
             self.is_opened = False
 
     def get_frame(self) -> np.ndarray:
-        if not self.cap or not self.is_opened:
-            return self._generate_diagnostic_frame("CAMERA NOT DETECTED / PORT BUSY")
+        with self._lock:
+            if not self.cap or not self.is_opened:
+                return self._generate_diagnostic_frame("CAMERA NOT DETECTED / PORT BUSY")
 
-        try:
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                if self.is_video_file:
-                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    ret, frame = self.cap.read()
-                    if ret and frame is not None:
-                        return frame
-                return self._generate_diagnostic_frame("NO VIDEO SIGNAL - CHECK USB CONNECTION")
-            return frame
-        except Exception:
-            return self._generate_diagnostic_frame("CAMERA BUSY / RECONNECTING")
+            try:
+                ret, frame = self.cap.read()
+                if not ret or frame is None:
+                    if self.is_video_file:
+                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = self.cap.read()
+                        if ret and frame is not None:
+                            return frame
+                    return self._generate_diagnostic_frame("NO VIDEO SIGNAL - CHECK USB CONNECTION")
+                return frame
+            except Exception:
+                return self._generate_diagnostic_frame("CAMERA BUSY / RECONNECTING")
 
     def _generate_diagnostic_frame(self, message: str) -> np.ndarray:
         """Industrial diagnostic frame displayed when camera is unplugged or unavailable."""
@@ -116,13 +119,14 @@ class OpenCVCamera(BaseCamera):
         return frame
 
     def release(self):
-        if self.cap:
-            try:
-                self.cap.release()
-            except Exception as e:
-                print(f"[OpenCVCamera] Error during release: {e}")
-        self.cap = None
-        self.is_opened = False
+        with self._lock:
+            if self.cap:
+                try:
+                    self.cap.release()
+                except Exception as e:
+                    print(f"[OpenCVCamera] Error during release: {e}")
+            self.cap = None
+            self.is_opened = False
 
 class CameraService:
     _instance = None
@@ -195,6 +199,19 @@ class CameraService:
 
             return self.get_status()
 
+    def stop(self):
+        """Stops background capture thread and releases camera hardware."""
+        with self._lock:
+            self.is_running = False
+            if self.camera:
+                try:
+                    self.camera.release()
+                except Exception:
+                    pass
+                self.camera = None
+            self.is_connected = False
+            time.sleep(0.05)
+
     def _capture_loop(self):
         while self.is_running:
             try:
@@ -239,37 +256,41 @@ class CameraService:
             current_usb_idx = self.device_index if self.mode == "USB" else None
 
             for idx in range(max_indices):
-                if idx == current_usb_idx and self.camera and getattr(self.camera, "is_opened", False):
-                    w = getattr(self.camera, "actual_width", self.width)
-                    h = getattr(self.camera, "actual_height", self.height)
+                if idx == current_usb_idx:
+                    act_w = getattr(self.camera, "actual_width", self.width) if self.camera else self.width
+                    act_h = getattr(self.camera, "actual_height", self.height) if self.camera else self.height
+                    is_open = getattr(self.camera, "is_opened", False) if self.camera else False
                     devices.append({
                         "index": idx,
-                        "name": f"USB Camera {idx} (Active)",
-                        "resolution": f"{w}x{h}",
-                        "available": True,
+                        "name": f"USB Camera {idx}" + (" (Active)" if is_open else " (Selected)"),
+                        "resolution": f"{act_w}x{act_h}",
+                        "available": is_open,
                         "is_current": True
                     })
                     continue
 
+                cap = None
                 try:
                     cap = cv2.VideoCapture(idx, backend)
-                    if not cap.isOpened() and backend != cv2.CAP_ANY:
+                    if not cap.isOpened() and platform.system() != "Windows":
                         cap = cv2.VideoCapture(idx)
 
-                    if cap.isOpened():
-                        ret, frame = cap.read()
-                        if ret and frame is not None:
-                            h, w = frame.shape[:2]
-                            devices.append({
-                                "index": idx,
-                                "name": f"USB Camera {idx}",
-                                "resolution": f"{w}x{h}",
-                                "available": True,
-                                "is_current": (idx == current_usb_idx)
-                            })
-                        cap.release()
+                    if cap and cap.isOpened():
+                        devices.append({
+                            "index": idx,
+                            "name": f"USB Camera {idx}",
+                            "resolution": "1280x720",
+                            "available": True,
+                            "is_current": (idx == current_usb_idx)
+                        })
                 except Exception as e:
                     print(f"[CameraService] Probe error index {idx}: {e}")
+                finally:
+                    if cap is not None:
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
 
             if not devices:
                 devices.append({

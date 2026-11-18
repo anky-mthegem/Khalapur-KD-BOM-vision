@@ -12,6 +12,7 @@ client = TestClient(app)
 
 def test_opencv_camera_usb_init():
     """Verify OpenCVCamera initializes in USB mode and produces valid 1280x720 frames."""
+    camera_service.stop()
     cam = OpenCVCamera(0, width=1280, height=720)
     assert cam.is_usb is True
     assert cam.source == 0
