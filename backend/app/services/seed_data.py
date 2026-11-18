@@ -12,6 +12,52 @@ from backend.app.config import SAMPLE_DATA_DIR
 SAMPLE_MASTER_CODE = "31162814SD05076"
 SAMPLE_DESCRIPTION = "HRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3 (HRD199065)"
 
+SAMPLE_RECIPE_2_CODE = "31162814SD06001"
+SAMPLE_RECIPE_2_DESC = "HARDWARE PACK - KREATION 600W BASE UNIT"
+
+SAMPLE_RECIPE_2_ITEMS = [
+    {
+        "sr_no": 1,
+        "item_name": "LEVELER FOR LEG KREATION X3",
+        "drawing_no": "HOM196273",
+        "part_uid": "HOM196273",
+        "target_qty": 4,
+        "is_vision_inspected": True
+    },
+    {
+        "sr_no": 2,
+        "item_name": "SHELF SUPPORT",
+        "drawing_no": "DOS210915",
+        "part_uid": "DOS210915",
+        "target_qty": 4,
+        "is_vision_inspected": True
+    },
+    {
+        "sr_no": 3,
+        "item_name": 'HEX NUT (3/16" BSW)',
+        "drawing_no": "HRD100314",
+        "part_uid": "HRD100314",
+        "target_qty": 4,
+        "is_vision_inspected": True
+    },
+    {
+        "sr_no": 4,
+        "item_name": "M4x12L PH HD CSK SCREW ZN PLATED",
+        "drawing_no": "HRD163160",
+        "part_uid": "HRD163160",
+        "target_qty": 8,
+        "is_vision_inspected": True
+    },
+    {
+        "sr_no": 5,
+        "item_name": "CARTON (470L × 140W × 55H)",
+        "drawing_no": "—",
+        "part_uid": "NO_DWG_CARTON_470L_140W_55H",
+        "target_qty": 1,
+        "is_vision_inspected": False
+    }
+]
+
 SAMPLE_LINE_ITEMS = [
     {
         "sr_no": 1,
@@ -192,39 +238,44 @@ def seed_database_sync(db: Session):
 
     db.commit()
 
-    # 2. Seed Sample BOM Recipe
-    recipe = db.query(BomRecipe).filter_by(master_item_code=SAMPLE_MASTER_CODE).first()
-    vision_count = sum(1 for it in SAMPLE_LINE_ITEMS if it["is_vision_inspected"])
+    # 2. Seed Sample BOM Recipes (Multiple Recipes Supported)
+    recipes_to_seed = [
+        (SAMPLE_MASTER_CODE, SAMPLE_DESCRIPTION, SAMPLE_LINE_ITEMS),
+        (SAMPLE_RECIPE_2_CODE, SAMPLE_RECIPE_2_DESC, SAMPLE_RECIPE_2_ITEMS)
+    ]
 
-    if not recipe:
-        recipe = BomRecipe(
-            master_item_code=SAMPLE_MASTER_CODE,
-            description=SAMPLE_DESCRIPTION,
-            total_items=len(SAMPLE_LINE_ITEMS),
-            vision_items_count=vision_count
-        )
-        db.add(recipe)
-        db.flush()
-    else:
-        recipe.description = SAMPLE_DESCRIPTION
-        recipe.total_items = len(SAMPLE_LINE_ITEMS)
-        recipe.vision_items_count = vision_count
-        # Remove old items and re-insert
-        for old_it in db.query(BomRecipeItem).filter_by(recipe_id=recipe.id).all():
-            db.delete(old_it)
-        db.flush()
+    for m_code, m_desc, m_items in recipes_to_seed:
+        recipe = db.query(BomRecipe).filter_by(master_item_code=m_code).first()
+        vision_count = sum(1 for it in m_items if it["is_vision_inspected"])
 
-    for it in SAMPLE_LINE_ITEMS:
-        recipe_item = BomRecipeItem(
-            recipe_id=recipe.id,
-            sr_no=it["sr_no"],
-            part_uid=it["part_uid"],
-            item_name=it["item_name"],
-            drawing_no=it["drawing_no"],
-            target_qty=it["target_qty"],
-            is_vision_inspected=it["is_vision_inspected"]
-        )
-        db.add(recipe_item)
+        if not recipe:
+            recipe = BomRecipe(
+                master_item_code=m_code,
+                description=m_desc,
+                total_items=len(m_items),
+                vision_items_count=vision_count
+            )
+            db.add(recipe)
+            db.flush()
+        else:
+            recipe.description = m_desc
+            recipe.total_items = len(m_items)
+            recipe.vision_items_count = vision_count
+            for old_it in db.query(BomRecipeItem).filter_by(recipe_id=recipe.id).all():
+                db.delete(old_it)
+            db.flush()
+
+        for it in m_items:
+            recipe_item = BomRecipeItem(
+                recipe_id=recipe.id,
+                sr_no=it["sr_no"],
+                part_uid=it["part_uid"],
+                item_name=it["item_name"],
+                drawing_no=it["drawing_no"],
+                target_qty=it["target_qty"],
+                is_vision_inspected=it["is_vision_inspected"]
+            )
+            db.add(recipe_item)
     db.commit()
 
     # 3. Create Sample Excel Spreadsheet and CSV files
@@ -232,44 +283,44 @@ def seed_database_sync(db: Session):
 
 def create_sample_files():
     """Generates the exact standard plant BOM Excel (.xlsx) and CSV files."""
-    excel_path = SAMPLE_DATA_DIR / f"BOM_{SAMPLE_MASTER_CODE}.xlsx"
-    csv_path = SAMPLE_DATA_DIR / f"BOM_{SAMPLE_MASTER_CODE}.csv"
+    for m_code, m_desc, m_items in [
+        (SAMPLE_MASTER_CODE, SAMPLE_DESCRIPTION, SAMPLE_LINE_ITEMS),
+        (SAMPLE_RECIPE_2_CODE, SAMPLE_RECIPE_2_DESC, SAMPLE_RECIPE_2_ITEMS)
+    ]:
+        excel_path = SAMPLE_DATA_DIR / f"BOM_{m_code}.xlsx"
+        csv_path = SAMPLE_DATA_DIR / f"BOM_{m_code}.csv"
 
-    # 1. Create standard CSV
-    lines = [
-        f",Item Code(Master),{SAMPLE_MASTER_CODE},",
-        f",Description,{SAMPLE_DESCRIPTION},",
-        "Sr No,Item Name,Drawing No,Qty"
-    ]
-    for it in SAMPLE_LINE_ITEMS:
-        lines.append(f'{it["sr_no"]},"{it["item_name"]}",{it["drawing_no"]},{it["target_qty"]}')
+        # 1. Create standard CSV
+        lines = [
+            f",Item Code(Master),{m_code},",
+            f",Description,{m_desc},",
+            "Sr No,Item Name,Drawing No,Qty"
+        ]
+        for it in m_items:
+            lines.append(f'{it["sr_no"]},"{it["item_name"]}",{it["drawing_no"]},{it["target_qty"]}')
 
-    with open(csv_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
 
-    # 2. Create standard Excel (.xlsx) matching exact plant layout
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "BOM Details"
+        # 2. Create standard Excel (.xlsx) matching exact plant layout
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "BOM Details"
 
-    # Row 1: ,Item Code(Master),31162814SD05076,
-    ws.cell(row=1, column=2, value="Item Code(Master)")
-    ws.cell(row=1, column=3, value=SAMPLE_MASTER_CODE)
+        ws.cell(row=1, column=2, value="Item Code(Master)")
+        ws.cell(row=1, column=3, value=m_code)
 
-    # Row 2: ,Description,HRD PKT FOR MAIN BODY...
-    ws.cell(row=2, column=2, value="Description")
-    ws.cell(row=2, column=3, value=SAMPLE_DESCRIPTION)
+        ws.cell(row=2, column=2, value="Description")
+        ws.cell(row=2, column=3, value=m_desc)
 
-    # Row 3: Headers
-    headers = ["Sr No", "Item Name", "Drawing No", "Qty"]
-    for col_idx, h in enumerate(headers, start=1):
-        ws.cell(row=3, column=col_idx, value=h)
+        headers = ["Sr No", "Item Name", "Drawing No", "Qty"]
+        for col_idx, h in enumerate(headers, start=1):
+            ws.cell(row=3, column=col_idx, value=h)
 
-    # Line items starting from row 4
-    for row_idx, item in enumerate(SAMPLE_LINE_ITEMS, start=4):
-        ws.cell(row=row_idx, column=1, value=item["sr_no"])
-        ws.cell(row=row_idx, column=2, value=item["item_name"])
-        ws.cell(row=row_idx, column=3, value=item["drawing_no"])
-        ws.cell(row=row_idx, column=4, value=item["target_qty"])
+        for row_idx, item in enumerate(m_items, start=4):
+            ws.cell(row=row_idx, column=1, value=item["sr_no"])
+            ws.cell(row=row_idx, column=2, value=item["item_name"])
+            ws.cell(row=row_idx, column=3, value=item["drawing_no"])
+            ws.cell(row=row_idx, column=4, value=item["target_qty"])
 
-    wb.save(str(excel_path))
+        wb.save(str(excel_path))
