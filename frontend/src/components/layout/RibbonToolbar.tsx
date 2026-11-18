@@ -51,7 +51,7 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
   isTripwireEditMode,
   onCompleteBatch,
   onOpenUploadModal,
-  cameraMode = 'SYNTHETIC',
+  cameraMode = 'USB',
   cameraIndex = 0,
   onSwitchCamera,
   onOpenCameraSettings,
@@ -130,13 +130,11 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
               </span>
               <div className="flex items-center space-x-1.5">
                 <select
-                  value={cameraMode === 'USB' ? `USB_${cameraIndex}` : 'SYNTHETIC'}
+                  value={`USB_${cameraIndex}`}
                   onChange={(e) => {
                     const val = e.target.value;
                     if (val === 'SETTINGS') {
                       onOpenCameraSettings && onOpenCameraSettings();
-                    } else if (val === 'SYNTHETIC') {
-                      onSwitchCamera && onSwitchCamera('SYNTHETIC');
                     } else if (val.startsWith('USB_')) {
                       const idx = parseInt(val.split('_')[1], 10);
                       onSwitchCamera && onSwitchCamera('USB', idx);
@@ -148,7 +146,6 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
                   <option value="USB_1">📹 USB Camera [Index 1]</option>
                   <option value="USB_2">📹 USB Camera [Index 2]</option>
                   <option value="USB_3">📹 USB Camera [Index 3]</option>
-                  <option value="SYNTHETIC">⚙️ Synthetic Simulator</option>
                   <option value="SETTINGS">⚙️ Camera Settings & Scan...</option>
                 </select>
 

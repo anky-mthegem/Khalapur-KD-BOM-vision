@@ -56,7 +56,7 @@ class SystemSettings(BaseModel):
     plant_line: str = "Plant Line 1 (Khalapur)"
     active_master_code: str = "31162814SD05076"
     active_model_name: str = DEFAULT_MODEL_NAME
-    camera_mode: str = "MOCK"  # "MOCK", "USB", "RTSP"
+    camera_mode: str = "USB"  # Pure live USB hardware camera
     camera_index: int = 0
     rtsp_url: str = ""
     target_fps: int = 30

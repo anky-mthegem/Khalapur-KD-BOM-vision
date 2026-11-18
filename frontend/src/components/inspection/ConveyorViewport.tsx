@@ -26,7 +26,7 @@ export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
   totalTarget,
   totalCounted,
   zoomLevel,
-  cameraMode = 'SYNTHETIC',
+  cameraMode = 'USB',
   cameraIndex = 0,
   onSwitchCamera,
   onOpenCameraSettings
@@ -85,13 +85,11 @@ export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
 
           {/* Camera Source Selector Dropdown */}
           <select
-            value={cameraMode === 'USB' ? `USB_${cameraIndex}` : 'SYNTHETIC'}
+            value={`USB_${cameraIndex}`}
             onChange={(e) => {
               const val = e.target.value;
               if (val === 'SETTINGS') {
                 onOpenCameraSettings && onOpenCameraSettings();
-              } else if (val === 'SYNTHETIC') {
-                onSwitchCamera && onSwitchCamera('SYNTHETIC');
               } else if (val.startsWith('USB_')) {
                 onSwitchCamera && onSwitchCamera('USB', parseInt(val.split('_')[1], 10));
               }
@@ -102,7 +100,6 @@ export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
             <option value="USB_1">📹 USB Camera [Index 1]</option>
             <option value="USB_2">📹 USB Camera [Index 2]</option>
             <option value="USB_3">📹 USB Camera [Index 3]</option>
-            <option value="SYNTHETIC">⚙️ Synthetic Simulator</option>
             <option value="SETTINGS">⚙️ Camera Settings & Port Scan...</option>
           </select>
 
@@ -142,7 +139,7 @@ export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
           <div className="flex items-center space-x-1.5 bg-black/60 px-2.5 py-1 rounded text-[11px] font-mono text-green-300 border border-green-500/30">
             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
             <span className="font-bold">
-              {cameraMode === 'USB' ? `ACTIVE: USB CAM [${cameraIndex}]` : 'ACTIVE: SIMULATOR'}
+              ACTIVE: USB CAM [{cameraIndex}]
             </span>
           </div>
         </div>

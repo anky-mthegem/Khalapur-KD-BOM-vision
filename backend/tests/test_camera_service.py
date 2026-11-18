@@ -1,33 +1,36 @@
 """
 Unit & Integration Tests for USB Camera & Video Stream Subsystem.
-Verifies hardware device index selection, synthetic conveyor fallback, and stream switching endpoints.
+Verifies physical USB camera initialization, hardware device index selection, and streaming endpoints.
 """
 import pytest
 import numpy as np
 from fastapi.testclient import TestClient
 from backend.app.main import app
-from backend.app.services.camera_service import camera_service, OpenCVCamera, SyntheticConveyorCamera
+from backend.app.services.camera_service import camera_service, OpenCVCamera
 
 client = TestClient(app)
 
-def test_synthetic_camera_generation():
-    """Verify autonomous synthetic camera creates valid 1280x720 RGB frames."""
-    cam = SyntheticConveyorCamera(width=1280, height=720)
+def test_opencv_camera_usb_init():
+    """Verify OpenCVCamera initializes in USB mode and produces valid 1280x720 frames."""
+    cam = OpenCVCamera(0, width=1280, height=720)
+    assert cam.is_usb is True
+    assert cam.source == 0
     frame = cam.get_frame()
     assert frame is not None
-    assert frame.shape == (720, 1280, 3)
     assert isinstance(frame, np.ndarray)
+    assert frame.shape[0] > 0 and frame.shape[1] > 0
     cam.release()
 
 def test_camera_service_init_and_status():
-    """Verify camera service reports valid configuration status."""
-    status = camera_service.init_source("SYNTHETIC")
-    assert status["mode"] == "SYNTHETIC"
-    assert status["source_type"] == "SYNTHETIC_CONVEYOR"
-    assert status["is_connected"] is True
+    """Verify camera service reports valid USB camera configuration status."""
+    status = camera_service.init_source("USB", 0)
+    assert status["mode"] == "USB"
+    assert status["device_index"] == 0
+    assert "USB_CAM_0" in status["source_type"]
 
     curr = camera_service.get_status()
-    assert curr["mode"] == "SYNTHETIC"
+    assert curr["mode"] == "USB"
+    assert curr["device_index"] == 0
     assert "resolution" in curr
     assert curr["target_fps"] > 0
 
@@ -41,24 +44,26 @@ def test_camera_device_probing():
     assert "name" in dev0
     assert "available" in dev0
 
-def test_camera_switch_to_usb_and_synthetic():
-    """Verify switching to USB index 0 and back to Synthetic."""
-    usb_status = camera_service.init_source("USB", 0)
-    assert usb_status["mode"] == "USB"
-    assert usb_status["device_index"] == 0
-    assert "USB_CAM_0" in usb_status["source_type"]
+def test_camera_switch_usb_indices():
+    """Verify switching between USB camera index 0 and index 1."""
+    status0 = camera_service.init_source("USB", 0)
+    assert status0["mode"] == "USB"
+    assert status0["device_index"] == 0
 
-    # Revert to synthetic
-    synth_status = camera_service.init_source("SYNTHETIC")
-    assert synth_status["mode"] == "SYNTHETIC"
-    assert synth_status["source_type"] == "SYNTHETIC_CONVEYOR"
+    status1 = camera_service.init_source("USB", 1)
+    assert status1["mode"] == "USB"
+    assert status1["device_index"] == 1
+    assert "USB_CAM_1" in status1["source_type"]
+
+    # Revert back to index 0
+    camera_service.init_source("USB", 0)
 
 def test_stream_api_status():
     """Verify GET /api/stream/status endpoint."""
     res = client.get("/api/stream/status")
     assert res.status_code == 200
     data = res.json()
-    assert "mode" in data
+    assert data["mode"] == "USB"
     assert "source_type" in data
     assert "is_connected" in data
 
@@ -67,29 +72,28 @@ def test_stream_api_devices():
     res = client.get("/api/stream/devices")
     assert res.status_code == 200
     data = res.json()
-    assert "current_mode" in data
+    assert data["current_mode"] == "USB"
     assert "devices" in data
     assert isinstance(data["devices"], list)
 
 def test_stream_api_source_switch():
-    """Verify POST /api/stream/source switching between USB and Synthetic."""
-    # Switch to USB index 0
+    """Verify POST /api/stream/source switching USB camera index."""
+    res = client.post("/api/stream/source", json={"mode": "USB", "device_index": 1})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] in ["CONNECTED", "WARNING_NO_SIGNAL", "SOURCE_CHANGED"]
+    assert data["mode"] == "USB"
+    assert data["device_index"] == 1
+
+    # Switch back to index 0
     res = client.post("/api/stream/source", json={"mode": "USB", "device_index": 0})
     assert res.status_code == 200
     data = res.json()
-    assert data["status"] in ["CONNECTED", "SOURCE_CHANGED"]
     assert data["mode"] == "USB"
     assert data["device_index"] == 0
 
-    # Switch back to Synthetic
-    res = client.post("/api/stream/source", json={"mode": "SYNTHETIC"})
-    assert res.status_code == 200
-    data = res.json()
-    assert data["mode"] == "SYNTHETIC"
-
 def test_stream_single_frame():
     """Verify GET /api/stream/frame returns image/jpeg bytes."""
-    camera_service.init_source("SYNTHETIC")
     res = client.get("/api/stream/frame")
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/jpeg"

@@ -20,8 +20,8 @@ router = APIRouter(tags=["Video Stream & WebSockets"])
 active_connections: List[WebSocket] = []
 
 class CameraSwitchRequest(BaseModel):
-    mode: str = "USB"  # "USB", "SYNTHETIC", "RTSP", "FILE"
-    device_index: Optional[int] = None
+    mode: str = "USB"  # "USB", "RTSP"
+    device_index: Optional[int] = 0
     path_or_index: Optional[Union[str, int]] = None
     width: Optional[int] = 1280
     height: Optional[int] = 720
@@ -118,11 +118,10 @@ async def switch_camera_source(
     path_or_index: Optional[Union[str, int]] = None
 ):
     """
-    Switches camera source between USB Camera (with chosen device index),
-    Synthetic Simulator, RTSP, or video file.
+    Switches camera source to chosen USB Camera device index or RTSP stream.
     Supports JSON body payload or URL query parameters.
     """
-    target_mode = (payload.mode if payload and payload.mode else mode) or "SYNTHETIC"
+    target_mode = (payload.mode if payload and payload.mode else mode) or "USB"
     target_index = None
     if payload and payload.device_index is not None:
         target_index = payload.device_index

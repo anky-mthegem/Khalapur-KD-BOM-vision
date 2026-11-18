@@ -192,7 +192,7 @@ export const App: React.FC = () => {
         isTripwireEditMode={isTripwireEditMode}
         onCompleteBatch={handleCompleteBatch}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
-        cameraMode={cameraStatus?.mode || 'SYNTHETIC'}
+        cameraMode={cameraStatus?.mode || 'USB'}
         cameraIndex={cameraStatus?.device_index ?? 0}
         onSwitchCamera={handleSwitchCamera}
         onOpenCameraSettings={() => setIsCameraModalOpen(true)}
@@ -212,7 +212,7 @@ export const App: React.FC = () => {
               totalTarget={sessionState.total_target}
               totalCounted={sessionState.total_counted}
               zoomLevel={zoomLevel}
-              cameraMode={cameraStatus?.mode || 'SYNTHETIC'}
+              cameraMode={cameraStatus?.mode || 'USB'}
               cameraIndex={cameraStatus?.device_index ?? 0}
               onSwitchCamera={handleSwitchCamera}
               onOpenCameraSettings={() => setIsCameraModalOpen(true)}

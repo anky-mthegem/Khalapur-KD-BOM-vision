@@ -164,7 +164,7 @@ export interface CameraDevice {
 }
 
 export interface CameraDevicesResponse {
-  current_mode: "USB" | "SYNTHETIC" | "RTSP" | "FILE";
+  current_mode: "USB" | "RTSP";
   current_index: number;
   source_type: string;
   is_connected: boolean;
@@ -173,7 +173,7 @@ export interface CameraDevicesResponse {
 
 export interface CameraStatus {
   status: "CONNECTED" | "WARNING_NO_SIGNAL";
-  mode: "USB" | "SYNTHETIC" | "RTSP" | "FILE";
+  mode: "USB" | "RTSP";
   device_index: number;
   source_type: string;
   is_connected: boolean;
