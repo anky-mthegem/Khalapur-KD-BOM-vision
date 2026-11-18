@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Sliders, CheckCircle2, AlertTriangle, Play } from 'lucide-react';
+import { Sliders, CheckCircle2, AlertTriangle, Play, Camera, RefreshCw } from 'lucide-react';
 import { TripwireGeometry } from '../../types/bom';
 
 interface ConveyorViewportProps {
@@ -11,6 +11,10 @@ interface ConveyorViewportProps {
   totalTarget: number;
   totalCounted: number;
   zoomLevel: number;
+  cameraMode?: string;
+  cameraIndex?: number;
+  onSwitchCamera?: (mode: string, index?: number) => void;
+  onOpenCameraSettings?: () => void;
 }
 
 export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
@@ -21,7 +25,11 @@ export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
   overallStatus,
   totalTarget,
   totalCounted,
-  zoomLevel
+  zoomLevel,
+  cameraMode = 'SYNTHETIC',
+  cameraIndex = 0,
+  onSwitchCamera,
+  onOpenCameraSettings
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draggingHandle, setDraggingHandle] = useState<'p1' | 'p2' | null>(null);
@@ -63,21 +71,94 @@ export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
 
   return (
     <div
-      className="relative flex-1 bg-black flex flex-col items-center justify-center overflow-hidden border-r border-[#D2D0CE] select-none"
+      className="relative flex-1 bg-black flex flex-col items-center justify-between overflow-hidden border-r border-[#D2D0CE] select-none"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
-      {/* Top Floating Status Banner */}
-      <div className="absolute top-2 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
+      {/* 1. TOP DEDICATED CAMERA SOURCE & DEVICE INDEX SELECTOR BAR */}
+      <div className="w-full bg-[#1E3E6D] text-white px-3 py-1.5 flex items-center justify-between border-b-2 border-[#2B579A] text-xs z-30 shadow-md flex-shrink-0">
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-1.5 font-bold text-yellow-300">
+            <Camera className="w-4 h-4 text-green-400" />
+            <span className="uppercase tracking-wider">LIVE CAMERA SOURCE:</span>
+          </div>
+
+          {/* Camera Source Selector Dropdown */}
+          <select
+            value={cameraMode === 'USB' ? `USB_${cameraIndex}` : 'SYNTHETIC'}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === 'SETTINGS') {
+                onOpenCameraSettings && onOpenCameraSettings();
+              } else if (val === 'SYNTHETIC') {
+                onSwitchCamera && onSwitchCamera('SYNTHETIC');
+              } else if (val.startsWith('USB_')) {
+                onSwitchCamera && onSwitchCamera('USB', parseInt(val.split('_')[1], 10));
+              }
+            }}
+            className="bg-white text-gray-900 font-bold px-2.5 py-1 rounded text-xs border-2 border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-300 cursor-pointer shadow"
+          >
+            <option value="USB_0">📹 USB Camera [Index 0]</option>
+            <option value="USB_1">📹 USB Camera [Index 1]</option>
+            <option value="USB_2">📹 USB Camera [Index 2]</option>
+            <option value="USB_3">📹 USB Camera [Index 3]</option>
+            <option value="SYNTHETIC">⚙️ Synthetic Simulator</option>
+            <option value="SETTINGS">⚙️ Camera Settings & Port Scan...</option>
+          </select>
+
+          {/* Direct 1-Click Camera Index Buttons */}
+          <div className="flex items-center space-x-1 bg-black/40 px-2 py-0.5 rounded border border-blue-400/30">
+            <span className="text-[11px] text-blue-200 font-bold uppercase mr-1">Choose Index:</span>
+            {[0, 1, 2, 3, 4].map((idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => onSwitchCamera && onSwitchCamera('USB', idx)}
+                className={`w-6 h-5 rounded text-xs font-mono font-bold transition-all ${
+                  cameraMode === 'USB' && cameraIndex === idx
+                    ? 'bg-yellow-400 text-black shadow-md ring-2 ring-white scale-105'
+                    : 'bg-[#2B579A] hover:bg-blue-600 text-white'
+                }`}
+                title={`Click to connect directly to USB Camera Index ${idx}`}
+              >
+                {idx}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Right: Camera Settings Button & Real-Time Indicator */}
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={onOpenCameraSettings}
+            className="flex items-center space-x-1.5 bg-[#107C41] hover:bg-[#0E6032] text-white px-2.5 py-1 rounded text-xs font-bold border border-green-300/40 transition-colors shadow-sm"
+            title="Open Camera Hardware Settings Modal"
+          >
+            <Sliders className="w-3.5 h-3.5 text-yellow-300" />
+            <span>Camera Setup</span>
+          </button>
+
+          <div className="flex items-center space-x-1.5 bg-black/60 px-2.5 py-1 rounded text-[11px] font-mono text-green-300 border border-green-500/30">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+            <span className="font-bold">
+              {cameraMode === 'USB' ? `ACTIVE: USB CAM [${cameraIndex}]` : 'ACTIVE: SIMULATOR'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Top Floating Inspection Status Banner */}
+      <div className="w-full px-3 pt-2 z-20 pointer-events-none">
         {overallStatus === 'PASS' ? (
-          <div className="bg-[#107C10] text-white px-4 py-1.5 rounded shadow-lg flex items-center space-x-2 border-2 border-white/50 w-full justify-center animate-pulse">
+          <div className="bg-[#107C10] text-white px-4 py-1.5 rounded shadow-lg flex items-center space-x-2 border-2 border-white/50 w-full justify-center animate-pulse pointer-events-auto">
             <CheckCircle2 className="w-5 h-5" />
             <span className="font-extrabold text-sm uppercase tracking-wider">
               PASS - 100% BOM MATCH ({totalCounted}/{totalTarget} PCS VERIFIED)
             </span>
           </div>
         ) : (
-          <div className="bg-[#2B579A]/95 text-white px-4 py-1.5 rounded shadow-md flex items-center space-x-2 border border-blue-400/40 w-full justify-between">
+          <div className="bg-[#2B579A]/95 text-white px-4 py-1.5 rounded shadow-md flex items-center space-x-2 border border-blue-400/40 w-full justify-between pointer-events-auto">
             <div className="flex items-center space-x-2">
               <Play className="w-4 h-4 text-green-400 fill-green-400" />
               <span className="font-bold text-xs uppercase tracking-wide">
@@ -91,10 +172,10 @@ export const ConveyorViewport: React.FC<ConveyorViewportProps> = ({
         )}
       </div>
 
-      {/* Main Video Viewport Canvas Container */}
+      {/* 3. Main Video Viewport Canvas Container */}
       <div
         ref={containerRef}
-        className="relative w-full h-full flex items-center justify-center overflow-hidden"
+        className="relative w-full flex-1 flex items-center justify-center overflow-hidden"
         style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'center center' }}
       >
         <img

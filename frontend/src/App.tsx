@@ -177,22 +177,10 @@ export const App: React.FC = () => {
     }));
   };
 
-  const cameraStatusText = cameraStatus
-    ? (cameraStatus.mode === 'USB' ? `USB [${cameraStatus.device_index}]` : 'SIMULATOR')
-    : 'OK (Conveyor)';
-  const isCameraConnected = cameraStatus ? cameraStatus.is_connected : true;
-
   return (
     <div className="flex flex-col h-screen w-screen bg-[#F3F2F1] overflow-hidden select-none">
       {/* 1. Top Windows/Office Title Bar */}
-      <TitleBar
-        activeMasterCode={activeMasterCode}
-        cameraStatus={cameraStatusText}
-        isCameraConnected={isCameraConnected}
-        onOpenCameraSettings={() => setIsCameraModalOpen(true)}
-        modelName={activeModelName}
-        plcStatus="PLC: READY"
-      />
+      <TitleBar activeMasterCode={activeMasterCode} />
 
       {/* 2. MS Word-Style Ribbon Toolbar */}
       <RibbonToolbar
@@ -224,6 +212,10 @@ export const App: React.FC = () => {
               totalTarget={sessionState.total_target}
               totalCounted={sessionState.total_counted}
               zoomLevel={zoomLevel}
+              cameraMode={cameraStatus?.mode || 'SYNTHETIC'}
+              cameraIndex={cameraStatus?.device_index ?? 0}
+              onSwitchCamera={handleSwitchCamera}
+              onOpenCameraSettings={() => setIsCameraModalOpen(true)}
             />
 
             {/* Right (35%): Excel-Style Dense BOM Recipe Grid */}

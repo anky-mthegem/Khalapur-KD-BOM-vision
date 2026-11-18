@@ -77,22 +77,22 @@ if not exist "backend\models\weights\yolo26s-obb.pt" (
 )
 
 :: 6. Check Frontend Build
-echo [5/6] Checking frontend production bundle...
-if not exist "frontend\dist\index.html" (
-    echo [4/5] Building frontend production assets...
-    where npm >nul 2>&1
-    if !errorlevel! equ 0 (
-        cd frontend
-        if not exist "node_modules" (
-            call npm install
-        )
-        call npm run build
-        cd ..
-    ) else (
-        echo [WARNING] Node.js/npm not found. Pre-bundled frontend will be used if available.
+echo [5/6] Updating frontend production bundle in frontend\dist...
+where npm >nul 2>&1
+if !errorlevel! equ 0 (
+    cd frontend
+    if not exist "node_modules" (
+        call npm install
     )
+    call npm run build
+    cd ..
+    echo [5/6] Frontend production bundle compiled successfully.
 ) else (
-    echo [5/6] Frontend production bundle verified in frontend\dist.
+    if exist "frontend\dist\index.html" (
+        echo [5/6] Node.js/npm not found. Using pre-bundled frontend in frontend\dist.
+    ) else (
+        echo [WARNING] Node.js/npm not found and frontend\dist does not exist.
+    )
 )
 
 :: 7. Launch Application & Auto-Open Browser

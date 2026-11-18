@@ -122,7 +122,68 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
       <div className="h-[84px] px-3 py-1 flex items-center bg-[#F3F2F1] overflow-x-auto">
         {activeTab === 'home' && (
           <div className="flex items-center space-x-1">
-            {/* Barcode / Master Code Group */}
+            {/* 1. FRONT-AND-CENTER: LIVE CAMERA SOURCE & INDEX SELECTOR GROUP */}
+            <div className="flex flex-col justify-center px-2 py-0.5 bg-blue-50/80 rounded border border-blue-300">
+              <span className="text-[10px] uppercase font-extrabold text-[#2B579A] mb-1 flex items-center space-x-1">
+                <Camera className="w-3.5 h-3.5 text-green-600" />
+                <span>Camera Source & Index</span>
+              </span>
+              <div className="flex items-center space-x-1.5">
+                <select
+                  value={cameraMode === 'USB' ? `USB_${cameraIndex}` : 'SYNTHETIC'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'SETTINGS') {
+                      onOpenCameraSettings && onOpenCameraSettings();
+                    } else if (val === 'SYNTHETIC') {
+                      onSwitchCamera && onSwitchCamera('SYNTHETIC');
+                    } else if (val.startsWith('USB_')) {
+                      const idx = parseInt(val.split('_')[1], 10);
+                      onSwitchCamera && onSwitchCamera('USB', idx);
+                    }
+                  }}
+                  className="px-2 py-1 text-xs border border-[#2B579A] rounded bg-white font-bold text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#2B579A] shadow-sm cursor-pointer"
+                >
+                  <option value="USB_0">📹 USB Camera [Index 0]</option>
+                  <option value="USB_1">📹 USB Camera [Index 1]</option>
+                  <option value="USB_2">📹 USB Camera [Index 2]</option>
+                  <option value="USB_3">📹 USB Camera [Index 3]</option>
+                  <option value="SYNTHETIC">⚙️ Synthetic Simulator</option>
+                  <option value="SETTINGS">⚙️ Camera Settings & Scan...</option>
+                </select>
+
+                <div className="flex items-center space-x-0.5">
+                  {[0, 1, 2, 3].map((idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => onSwitchCamera && onSwitchCamera('USB', idx)}
+                      className={`w-6 h-6 rounded text-xs font-mono font-bold transition-all ${
+                        cameraMode === 'USB' && cameraIndex === idx
+                          ? 'bg-[#2B579A] text-white shadow'
+                          : 'bg-white hover:bg-gray-100 text-gray-800 border border-gray-300'
+                      }`}
+                      title={`Switch to USB Camera Index ${idx}`}
+                    >
+                      {idx}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onOpenCameraSettings}
+                  className="bg-white hover:bg-blue-50 border border-blue-400 text-[#2B579A] px-2 py-1 rounded text-xs font-bold transition-colors shadow-sm ml-0.5"
+                  title="Configure camera hardware, resolution, or probe device index"
+                >
+                  Setup
+                </button>
+              </div>
+            </div>
+
+            <div className="ribbon-divider" />
+
+            {/* 2. Barcode / Master Code Group */}
             <div className="flex flex-col justify-center pr-2">
               <span className="text-[10px] uppercase font-bold text-gray-500 mb-1">Recipe Trigger</span>
               <form onSubmit={handleBarcodeSubmit} className="flex items-center space-x-1">
@@ -131,7 +192,7 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
                   placeholder="Scan Master Code / Barcode..."
                   value={barcodeInput}
                   onChange={(e) => setBarcodeInput(e.target.value)}
-                  className="px-2 py-1 text-xs border border-gray-400 rounded w-48 font-mono focus:outline-none focus:border-[#2B579A] bg-white"
+                  className="px-2 py-1 text-xs border border-gray-400 rounded w-44 font-mono focus:outline-none focus:border-[#2B579A] bg-white"
                 />
                 <button
                   type="submit"
@@ -144,7 +205,7 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
 
             <div className="ribbon-divider" />
 
-            {/* Verification & QC Actions */}
+            {/* 3. Verification & QC Actions */}
             <button
               onClick={onCompleteBatch}
               className="ribbon-btn-large bg-green-50 border-green-300 text-[#107C10] hover:bg-green-100"
@@ -167,7 +228,7 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
 
             <div className="ribbon-divider" />
 
-            {/* Tripwire Setup */}
+            {/* 4. Tripwire Setup */}
             <button
               onClick={onToggleTripwireMode}
               className={`ribbon-btn-large ${isTripwireEditMode ? 'bg-cyan-100 border-cyan-400 text-cyan-800' : ''}`}
@@ -180,6 +241,7 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
 
             <div className="ribbon-divider" />
 
+            {/* 5. Import BOM */}
             <button
               onClick={onOpenUploadModal}
               className="ribbon-btn-large"
@@ -189,51 +251,6 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
               <span>Import BOM</span>
               <span className="text-[9px] text-gray-500">Excel (.xlsx)</span>
             </button>
-
-            <div className="ribbon-divider" />
-
-            {/* Live Camera Source & Index Selector Group */}
-            <div className="flex flex-col justify-center px-1">
-              <span className="text-[10px] uppercase font-bold text-gray-500 mb-1 flex items-center space-x-1">
-                <Camera className="w-3.5 h-3.5 text-[#2B579A]" />
-                <span>Camera Source</span>
-              </span>
-              <div className="flex items-center space-x-1.5">
-                <select
-                  value={cameraMode === 'USB' ? `USB_${cameraIndex}` : 'SYNTHETIC'}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === 'SETTINGS') {
-                      onOpenCameraSettings && onOpenCameraSettings();
-                    } else if (val === 'SYNTHETIC') {
-                      onSwitchCamera && onSwitchCamera('SYNTHETIC');
-                    } else if (val.startsWith('USB_')) {
-                      const idx = parseInt(val.split('_')[1], 10);
-                      onSwitchCamera && onSwitchCamera('USB', idx);
-                    }
-                  }}
-                  className="px-2 py-1 text-xs border border-gray-400 rounded bg-white font-semibold text-gray-800 focus:outline-none focus:border-[#2B579A] shadow-sm cursor-pointer"
-                >
-                  <option value="USB_0">📹 USB Camera [Index 0]</option>
-                  <option value="USB_1">📹 USB Camera [Index 1]</option>
-                  <option value="USB_2">📹 USB Camera [Index 2]</option>
-                  <option value="USB_3">📹 USB Camera [Index 3]</option>
-                  <option value="SYNTHETIC">⚙️ Synthetic Simulator</option>
-                  <option value="SETTINGS">⚙️ Camera Settings & Scan...</option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={onOpenCameraSettings}
-                  className="ribbon-btn-large bg-blue-50/70 border-blue-200 text-blue-900 hover:bg-blue-100"
-                  title="Configure camera hardware, resolution, or probe device index"
-                >
-                  <Sliders className="w-4 h-4 text-[#2B579A] mb-0.5" />
-                  <span className="font-bold text-[#2B579A]">Camera Setup</span>
-                  <span className="text-[9px] text-gray-500">Index & Ports</span>
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
