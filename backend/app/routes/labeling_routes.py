@@ -150,19 +150,15 @@ async def capture_current_frame():
     if frame is None:
         raise HTTPException(status_code=503, detail="Camera frame not available.")
     
-    # Run default contour proposal
-    proposals = auto_labeler.auto_segment_contours(frame)
-    
-    # Encode as JPEG base64 or serve via stream
+    # Encode as JPEG base64
     ret, buffer = cv2.imencode(".jpg", frame)
-    import base64
     b64_img = base64.b64encode(buffer).decode("utf-8")
 
     return {
         "image_base64": f"data:image/jpeg;base64,{b64_img}",
         "width": frame.shape[1],
         "height": frame.shape[0],
-        "proposals": proposals
+        "proposals": []
     }
 
 @router.post("/auto-annotate")

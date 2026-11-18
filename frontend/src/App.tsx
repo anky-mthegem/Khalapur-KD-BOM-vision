@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TitleBar } from './components/layout/TitleBar';
 import { RibbonToolbar, RibbonTab } from './components/layout/RibbonToolbar';
 import { StatusBar } from './components/layout/StatusBar';
@@ -8,7 +8,7 @@ import { QcAlertModal } from './components/inspection/QcAlertModal';
 import { CameraSettingsModal } from './components/inspection/CameraSettingsModal';
 import { ExcelUploadModal } from './components/bom/ExcelUploadModal';
 import { BomRecipesTab } from './components/bom/BomRecipesTab';
-import { LabelingStudioTab } from './components/labeling/LabelingStudioTab';
+import { LabelingStudioTab, LabelingStudioTabRef } from './components/labeling/LabelingStudioTab';
 import { ModelTrainingTab } from './components/training/ModelTrainingTab';
 import { AuditLogsTab } from './components/audit/AuditLogsTab';
 
@@ -44,6 +44,18 @@ export const App: React.FC = () => {
   const [fps, setFps] = useState<number>(29.8);
   const [totalBatches, setTotalBatches] = useState<number>(12);
   const [passCount, setPassCount] = useState<number>(11);
+  const labelingStudioRef = useRef<LabelingStudioTabRef>(null);
+
+  const handleRibbonCaptureFrame = () => {
+    if (activeTab !== 'labeling') {
+      setActiveTab('labeling');
+      setTimeout(() => {
+        labelingStudioRef.current?.captureFrame();
+      }, 100);
+    } else {
+      labelingStudioRef.current?.captureFrame();
+    }
+  };
 
   // Initial load
   useEffect(() => {
@@ -196,6 +208,9 @@ export const App: React.FC = () => {
         cameraIndex={cameraStatus?.device_index ?? 0}
         onSwitchCamera={handleSwitchCamera}
         onOpenCameraSettings={() => setIsCameraModalOpen(true)}
+        onCaptureFrame={handleRibbonCaptureFrame}
+        onAutoAnnotate={() => labelingStudioRef.current?.autoAnnotate()}
+        onSaveAnnotations={() => labelingStudioRef.current?.saveAnnotations()}
       />
 
       {/* 3. Main Workspace Area */}
@@ -238,7 +253,10 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'labeling' && (
-          <LabelingStudioTab activeMasterCode={activeMasterCode} />
+          <LabelingStudioTab
+            ref={labelingStudioRef}
+            activeMasterCode={activeMasterCode}
+          />
         )}
 
         {activeTab === 'training' && (

@@ -224,7 +224,17 @@ class CameraService:
             time.sleep(1.0 / settings.target_fps)
 
     def get_latest_frame(self) -> Optional[np.ndarray]:
-        return self.active_frame.copy() if self.active_frame is not None else None
+        if self.active_frame is not None:
+            return self.active_frame.copy()
+        if self.camera:
+            try:
+                frame = self.camera.get_frame()
+                if frame is not None:
+                    self.active_frame = frame
+                    return frame.copy()
+            except Exception:
+                pass
+        return None
 
     def get_status(self) -> Dict[str, Any]:
         """Returns comprehensive status of active camera hardware."""

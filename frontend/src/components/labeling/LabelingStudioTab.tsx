@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'react';
 import {
   Upload,
   Camera,
@@ -78,13 +78,19 @@ interface ImageQueueItem {
 
 export type ActiveTool = 'rect' | 'obb' | 'select' | 'pan';
 
-interface LabelingStudioTabProps {
+export interface LabelingStudioTabRef {
+  captureFrame: () => Promise<void>;
+  autoAnnotate: () => Promise<void>;
+  saveAnnotations: () => Promise<void>;
+}
+
+export interface LabelingStudioTabProps {
   activeMasterCode: string;
 }
 
-export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
+export const LabelingStudioTab = React.forwardRef<LabelingStudioTabRef, LabelingStudioTabProps>(({
   activeMasterCode
-}) => {
+}, ref) => {
   // 1. Tool & Canvas Navigation State (Label Studio Viewport)
   const [activeTool, setActiveTool] = useState<ActiveTool>('rect');
   const [zoom, setZoom] = useState<number>(1.0);
@@ -253,8 +259,11 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
       setSelectedRegionId(null);
       // Center & fit image completely to viewport
       fitImageToContainer();
+      requestAnimationFrame(() => {
+        drawCanvas();
+      });
     };
-  }, [currentImageIndex, imageQueue.length, fitImageToContainer]);
+  }, [currentImageIndex, imageQueue.length, currentImage?.base64, fitImageToContainer]);
 
   // Sync active image regions to queue
   useEffect(() => {
@@ -274,10 +283,10 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [fitImageToContainer]);
 
-  // Redraw Canvas whenever regions, draft, selected box, zoom, or pan changes
+  // Redraw Canvas whenever regions, draft, selected box, zoom, pan, or canvasDisplaySize changes
   useEffect(() => {
     drawCanvas();
-  }, [regions, draftRect, selectedRegionId, zoom, pan]);
+  }, [regions, draftRect, selectedRegionId, zoom, pan, canvasDisplaySize]);
 
   // Mouse wheel zoom in / out centered on canvas
   const handleWheel = (e: React.WheelEvent) => {
@@ -320,8 +329,11 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
 
     if (newQueueItems.length > 0) {
-      setImageQueue((prev) => [...prev, ...newQueueItems]);
-      setCurrentImageIndex(imageQueue.length); // Jump to first newly added image
+      setImageQueue((prev) => {
+        const next = [...prev, ...newQueueItems];
+        setCurrentImageIndex(next.length - 1);
+        return next;
+      });
       setNotification({
         type: 'success',
         message: `Loaded ${newQueueItems.length} image(s). Ready for labeling: select a BOM label above and draw boxes.`
@@ -350,10 +362,14 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
         regions: initialRegions
       };
 
-      setImageQueue((prev) => [...prev, newItem]);
-      setCurrentImageIndex(imageQueue.length);
-      setNotification({ type: 'success', message: 'Live camera frame captured. Select a BOM label and draw boxes.' });
+      setImageQueue((prev) => {
+        const next = [...prev, newItem];
+        setCurrentImageIndex(next.length - 1);
+        return next;
+      });
+      setNotification({ type: 'success', message: 'Live conveyor frame captured. Select a BOM label and draw boxes.' });
     } catch (e: any) {
+      console.error("Camera frame capture failed:", e);
       setNotification({ type: 'error', message: 'Camera frame capture failed: ' + e.message });
     } finally {
       setIsProcessing(false);
@@ -906,6 +922,13 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
+  // Expose imperative actions to RibbonToolbar
+  useImperativeHandle(ref, () => ({
+    captureFrame: handleCaptureCamera,
+    autoAnnotate: handleAutoContours,
+    saveAnnotations: handleSaveToTraining,
+  }));
+
   // Keyboard Shortcuts (Label Studio Style: R, V, Delete, Ctrl+Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1453,4 +1476,6 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
       )}
     </div>
   );
-};
+});
+
+LabelingStudioTab.displayName = 'LabelingStudioTab';
