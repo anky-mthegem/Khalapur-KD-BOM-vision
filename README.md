@@ -131,6 +131,6 @@ khalapur-kd-bom-vision/
 
 ## Author & Engineering Credits
 
-Made By ❤️ By Aman  
+Made with ❤️ by Aman  
 *Industrial Vision & Automation Engineering | Khalapur KD Plant*
 

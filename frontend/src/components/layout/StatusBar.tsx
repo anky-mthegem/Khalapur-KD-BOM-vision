@@ -71,11 +71,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           </button>
         </div>
 
-        {/* Right Corner: Made By ❤️ By Aman */}
+        {/* Right Corner: Made with ❤️ by Aman */}
         <div className="flex items-center space-x-1 bg-[#1E3E6D] px-2.5 py-0.5 rounded border border-blue-400/40 text-white font-sans font-medium text-[11px] shadow-sm">
-          <span className="text-blue-100">Made By</span>
+          <span className="text-blue-100">Made with</span>
           <Heart className="w-3.5 h-3.5 text-red-400 fill-red-500 inline-block drop-shadow-sm" />
-          <span className="font-semibold text-white">By Aman</span>
+          <span className="font-semibold text-white">by Aman</span>
         </div>
       </div>
     </div>
