@@ -7,7 +7,9 @@ import {
   QcVerificationResult,
   TrainingStatus,
   ModelWeightFile,
-  AuditSessionLog
+  AuditSessionLog,
+  CameraDevicesResponse,
+  CameraStatus
 } from '../types/bom';
 
 const API_BASE = '/api';
@@ -137,12 +139,48 @@ export const api = {
     return res.json();
   },
 
-  // Video Source
-  async switchCameraSource(mode: string, pathOrIndex?: string) {
-    const url = `${API_BASE}/stream/source?mode=${mode}${pathOrIndex ? `&path_or_index=${encodeURIComponent(pathOrIndex)}` : ''}`;
-    const res = await fetch(url, { method: 'POST' });
+  // Video Source & Camera Hardware
+  async getCameraDevices(forceRefresh: boolean = false): Promise<CameraDevicesResponse> {
+    const res = await fetch(`${API_BASE}/stream/devices?force_refresh=${forceRefresh}`);
     if (!res.ok) throw new Error(await res.text());
     return res.json();
+  },
+
+  async getCameraStatus(): Promise<CameraStatus> {
+    const res = await fetch(`${API_BASE}/stream/status`);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async switchCameraSource(
+    paramsOrMode: string | { mode: string; device_index?: number; path_or_index?: string | number; width?: number; height?: number },
+    legacyPathOrIndex?: string | number
+  ): Promise<any> {
+    if (typeof paramsOrMode === 'string') {
+      const payload: any = { mode: paramsOrMode };
+      if (legacyPathOrIndex !== undefined) {
+        if (typeof legacyPathOrIndex === 'number' || (typeof legacyPathOrIndex === 'string' && /^\d+$/.test(legacyPathOrIndex))) {
+          payload.device_index = Number(legacyPathOrIndex);
+        } else {
+          payload.path_or_index = legacyPathOrIndex;
+        }
+      }
+      const res = await fetch(`${API_BASE}/stream/source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    } else {
+      const res = await fetch(`${API_BASE}/stream/source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paramsOrMode)
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
   },
 
   // Labeling Studio

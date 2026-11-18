@@ -5,6 +5,7 @@ import { StatusBar } from './components/layout/StatusBar';
 import { ConveyorViewport } from './components/inspection/ConveyorViewport';
 import { BomGrid } from './components/inspection/BomGrid';
 import { QcAlertModal } from './components/inspection/QcAlertModal';
+import { CameraSettingsModal } from './components/inspection/CameraSettingsModal';
 import { ExcelUploadModal } from './components/bom/ExcelUploadModal';
 import { BomRecipesTab } from './components/bom/BomRecipesTab';
 import { LabelingStudioTab } from './components/labeling/LabelingStudioTab';
@@ -12,7 +13,7 @@ import { ModelTrainingTab } from './components/training/ModelTrainingTab';
 import { AuditLogsTab } from './components/audit/AuditLogsTab';
 
 import { api } from './services/api';
-import { InspectionState, TripwireGeometry, QcVerificationResult } from './types/bom';
+import { InspectionState, TripwireGeometry, QcVerificationResult, CameraStatus } from './types/bom';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<RibbonTab>('home');
@@ -20,6 +21,8 @@ export const App: React.FC = () => {
   const [activeModelName, setActiveModelName] = useState<string>("yolo26s-obb.pt");
   const [isTripwireEditMode, setIsTripwireEditMode] = useState<boolean>(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState<boolean>(false);
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
   const [qcResult, setQcResult] = useState<QcVerificationResult | null>(null);
 
   // Inspection State
@@ -46,8 +49,9 @@ export const App: React.FC = () => {
   useEffect(() => {
     fetchSessionState();
     fetchTripwire();
+    fetchCameraStatus();
 
-    // WebSocket connection for real-time counts
+    // WebSocket connection for real-time counts and hardware events
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/inspection`;
     let ws: WebSocket;
@@ -62,6 +66,11 @@ export const App: React.FC = () => {
             if (msg.data.master_item_code) {
               setActiveMasterCode(msg.data.master_item_code);
             }
+            if (msg.camera) {
+              setCameraStatus(msg.camera);
+            }
+          } else if (msg.event === 'CAMERA_CHANGED') {
+            setCameraStatus(msg.data);
           } else if (msg.event === 'TRIPWIRE_CROSS') {
             // Slight FPS vibration jitter simulation
             setFps(prev => Number((29.5 + Math.random() * 0.8).toFixed(1)));
@@ -78,6 +87,24 @@ export const App: React.FC = () => {
       if (ws) ws.close();
     };
   }, []);
+
+  const fetchCameraStatus = async () => {
+    try {
+      const status = await api.getCameraStatus();
+      setCameraStatus(status);
+    } catch (e) {
+      console.warn("Failed to fetch camera status:", e);
+    }
+  };
+
+  const handleSwitchCamera = async (mode: string, index?: number) => {
+    try {
+      const res = await api.switchCameraSource({ mode, device_index: index });
+      setCameraStatus(res);
+    } catch (e: any) {
+      alert("Error switching camera source: " + e.message);
+    }
+  };
 
   const fetchSessionState = async () => {
     try {
@@ -150,12 +177,19 @@ export const App: React.FC = () => {
     }));
   };
 
+  const cameraStatusText = cameraStatus
+    ? (cameraStatus.mode === 'USB' ? `USB [${cameraStatus.device_index}]` : 'SIMULATOR')
+    : 'OK (Conveyor)';
+  const isCameraConnected = cameraStatus ? cameraStatus.is_connected : true;
+
   return (
     <div className="flex flex-col h-screen w-screen bg-[#F3F2F1] overflow-hidden select-none">
       {/* 1. Top Windows/Office Title Bar */}
       <TitleBar
         activeMasterCode={activeMasterCode}
-        cameraStatus="OK (Conveyor)"
+        cameraStatus={cameraStatusText}
+        isCameraConnected={isCameraConnected}
+        onOpenCameraSettings={() => setIsCameraModalOpen(true)}
         modelName={activeModelName}
         plcStatus="PLC: READY"
       />
@@ -170,6 +204,10 @@ export const App: React.FC = () => {
         isTripwireEditMode={isTripwireEditMode}
         onCompleteBatch={handleCompleteBatch}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
+        cameraMode={cameraStatus?.mode || 'SYNTHETIC'}
+        cameraIndex={cameraStatus?.device_index ?? 0}
+        onSwitchCamera={handleSwitchCamera}
+        onOpenCameraSettings={() => setIsCameraModalOpen(true)}
       />
 
       {/* 3. Main Workspace Area */}
@@ -236,6 +274,13 @@ export const App: React.FC = () => {
       />
 
       {/* Modals */}
+      <CameraSettingsModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        onSourceChanged={(status) => setCameraStatus(status)}
+        currentStatus={cameraStatus}
+      />
+
       <ExcelUploadModal
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}

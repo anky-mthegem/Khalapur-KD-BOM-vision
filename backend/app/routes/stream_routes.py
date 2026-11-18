@@ -1,13 +1,14 @@
 """
 Real-Time Video Streaming & WebSocket Event Broadcaster.
-Streams MJPEG video with rendered OBB overlays and broadcasts live tripwire counts via WebSocket.
+Streams MJPEG video with rendered OBB overlays and broadcasts live tripwire counts and hardware events via WebSocket.
 """
 import cv2
 import time
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Response
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Response, Body
 from fastapi.responses import StreamingResponse
-from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional, Union
 
 from backend.app.services.camera_service import camera_service
 from backend.app.services.vision_engine import vision_engine
@@ -17,6 +18,13 @@ from backend.app.config import settings
 router = APIRouter(tags=["Video Stream & WebSockets"])
 
 active_connections: List[WebSocket] = []
+
+class CameraSwitchRequest(BaseModel):
+    mode: str = "USB"  # "USB", "SYNTHETIC", "RTSP", "FILE"
+    device_index: Optional[int] = None
+    path_or_index: Optional[Union[str, int]] = None
+    width: Optional[int] = 1280
+    height: Optional[int] = 720
 
 async def broadcast_event(event_type: str, data: Any):
     payload = {"event": event_type, "data": data, "timestamp": time.time()}
@@ -86,21 +94,73 @@ def single_frame():
     ret, buffer = cv2.imencode(".jpg", frame)
     return Response(content=buffer.tobytes(), media_type="image/jpeg")
 
+@router.get("/api/stream/devices")
+def list_camera_devices(force_refresh: bool = Query(False, description="Force re-probing of hardware USB ports")):
+    """Enumerates available physical USB cameras and active stream mode."""
+    devices = camera_service.probe_available_cameras(max_indices=4, force=force_refresh)
+    return {
+        "current_mode": camera_service.mode,
+        "current_index": camera_service.device_index,
+        "source_type": camera_service.source_type,
+        "is_connected": camera_service.is_connected,
+        "devices": devices
+    }
+
+@router.get("/api/stream/status")
+def get_stream_status():
+    """Returns real-time status of active camera hardware."""
+    return camera_service.get_status()
+
 @router.post("/api/stream/source")
-def switch_camera_source(mode: str, path_or_index: Optional[str] = None):
-    """Switches the camera source (MOCK, SYNTHETIC, USB, RTSP)."""
-    camera_service.init_source(mode, path_or_index)
-    return {"status": "SOURCE_CHANGED", "source": camera_service.source_type}
+async def switch_camera_source(
+    payload: Optional[CameraSwitchRequest] = None,
+    mode: Optional[str] = None,
+    path_or_index: Optional[Union[str, int]] = None
+):
+    """
+    Switches camera source between USB Camera (with chosen device index),
+    Synthetic Simulator, RTSP, or video file.
+    Supports JSON body payload or URL query parameters.
+    """
+    target_mode = (payload.mode if payload and payload.mode else mode) or "SYNTHETIC"
+    target_index = None
+    if payload and payload.device_index is not None:
+        target_index = payload.device_index
+    elif payload and payload.path_or_index is not None:
+        target_index = payload.path_or_index
+    elif path_or_index is not None:
+        target_index = path_or_index
+    else:
+        target_index = settings.camera_index
+
+    width = payload.width if payload and payload.width else 1280
+    height = payload.height if payload and payload.height else 720
+
+    status = camera_service.init_source(
+        mode=target_mode,
+        path_or_index=target_index,
+        width=width,
+        height=height
+    )
+
+    # Broadcast source change to UI clients via WebSocket
+    await broadcast_event("CAMERA_CHANGED", status)
+
+    return {
+        "status": "SOURCE_CHANGED",
+        **status
+    }
 
 @router.websocket("/ws/inspection")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     active_connections.append(websocket)
     try:
-        # Send initial state
+        # Send initial inspection state and camera status
         await websocket.send_json({
             "event": "INIT_STATE",
-            "data": tripwire_service.get_current_state()
+            "data": tripwire_service.get_current_state(),
+            "camera": camera_service.get_status()
         })
         while True:
             # Keepalive listener

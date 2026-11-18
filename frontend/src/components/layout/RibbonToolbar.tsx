@@ -31,6 +31,11 @@ interface RibbonToolbarProps {
   isTripwireEditMode: boolean;
   onCompleteBatch: () => void;
   onOpenUploadModal: () => void;
+  // Camera actions
+  cameraMode?: string;
+  cameraIndex?: number;
+  onSwitchCamera?: (mode: string, index?: number) => void;
+  onOpenCameraSettings?: () => void;
   // Labeling actions
   onCaptureFrame?: () => void;
   onAutoAnnotate?: () => void;
@@ -46,6 +51,10 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
   isTripwireEditMode,
   onCompleteBatch,
   onOpenUploadModal,
+  cameraMode = 'SYNTHETIC',
+  cameraIndex = 0,
+  onSwitchCamera,
+  onOpenCameraSettings,
   onCaptureFrame,
   onAutoAnnotate,
   onSaveAnnotations
@@ -180,6 +189,51 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = ({
               <span>Import BOM</span>
               <span className="text-[9px] text-gray-500">Excel (.xlsx)</span>
             </button>
+
+            <div className="ribbon-divider" />
+
+            {/* Live Camera Source & Index Selector Group */}
+            <div className="flex flex-col justify-center px-1">
+              <span className="text-[10px] uppercase font-bold text-gray-500 mb-1 flex items-center space-x-1">
+                <Camera className="w-3.5 h-3.5 text-[#2B579A]" />
+                <span>Camera Source</span>
+              </span>
+              <div className="flex items-center space-x-1.5">
+                <select
+                  value={cameraMode === 'USB' ? `USB_${cameraIndex}` : 'SYNTHETIC'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'SETTINGS') {
+                      onOpenCameraSettings && onOpenCameraSettings();
+                    } else if (val === 'SYNTHETIC') {
+                      onSwitchCamera && onSwitchCamera('SYNTHETIC');
+                    } else if (val.startsWith('USB_')) {
+                      const idx = parseInt(val.split('_')[1], 10);
+                      onSwitchCamera && onSwitchCamera('USB', idx);
+                    }
+                  }}
+                  className="px-2 py-1 text-xs border border-gray-400 rounded bg-white font-semibold text-gray-800 focus:outline-none focus:border-[#2B579A] shadow-sm cursor-pointer"
+                >
+                  <option value="USB_0">📹 USB Camera [Index 0]</option>
+                  <option value="USB_1">📹 USB Camera [Index 1]</option>
+                  <option value="USB_2">📹 USB Camera [Index 2]</option>
+                  <option value="USB_3">📹 USB Camera [Index 3]</option>
+                  <option value="SYNTHETIC">⚙️ Synthetic Simulator</option>
+                  <option value="SETTINGS">⚙️ Camera Settings & Scan...</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={onOpenCameraSettings}
+                  className="ribbon-btn-large bg-blue-50/70 border-blue-200 text-blue-900 hover:bg-blue-100"
+                  title="Configure camera hardware, resolution, or probe device index"
+                >
+                  <Sliders className="w-4 h-4 text-[#2B579A] mb-0.5" />
+                  <span className="font-bold text-[#2B579A]">Camera Setup</span>
+                  <span className="text-[9px] text-gray-500">Index & Ports</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

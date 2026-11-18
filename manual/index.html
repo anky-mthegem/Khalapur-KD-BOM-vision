@@ -130,6 +130,31 @@
             </tr>
           </tbody>
         </table>
+
+        <h3>2.1 Live USB Camera Setup & Device Index Selection</h3>
+        <p>The vision station supports plug-and-play USB cameras and industrial UVC devices with dynamic runtime index switching:</p>
+        <div class="workflow-grid">
+          <div class="workflow-card">
+            <span class="step-num">Step 1</span>
+            <h4>Connect USB Hardware</h4>
+            <p>Plug the industrial camera into a USB 3.0 / USB 3.1 port on the workstation.</p>
+          </div>
+          <div class="workflow-card">
+            <span class="step-num">Step 2</span>
+            <h4>Choose Camera Index</h4>
+            <p>In the <strong>Home / Inspection</strong> ribbon, select <code>USB Camera [Index 0]</code>, <code>[Index 1]</code>, etc., or click the camera pill in the top title bar.</p>
+          </div>
+          <div class="workflow-card">
+            <span class="step-num">Step 3</span>
+            <h4>Rescan & Configure</h4>
+            <p>Open <strong>Camera Setup</strong> to re-probe USB ports, set resolution (1280x720 HD recommended), or toggle to Synthetic Simulator.</p>
+          </div>
+          <div class="workflow-card">
+            <span class="step-num">Step 4</span>
+            <h4>Inspect Live Feed</h4>
+            <p>The live camera feed streams instantly with real-time YOLO26-OBB bounding boxes and tripwire tracking.</p>
+          </div>
+        </div>
       </section>
 
       <!-- Section 3: Startup Procedure -->

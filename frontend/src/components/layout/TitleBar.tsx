@@ -1,9 +1,11 @@
 import React from 'react';
-import { Camera, Cpu, Radio, ShieldCheck, Factory, BookOpen } from 'lucide-react';
+import { Camera, Cpu, Radio, ShieldCheck, Factory, BookOpen, Sliders } from 'lucide-react';
 
 interface TitleBarProps {
   activeMasterCode: string;
   cameraStatus: string;
+  isCameraConnected?: boolean;
+  onOpenCameraSettings?: () => void;
   modelName: string;
   plcStatus: string;
 }
@@ -11,6 +13,8 @@ interface TitleBarProps {
 export const TitleBar: React.FC<TitleBarProps> = ({
   activeMasterCode,
   cameraStatus,
+  isCameraConnected = true,
+  onOpenCameraSettings,
   modelName,
   plcStatus
 }) => {
@@ -33,10 +37,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({
 
       {/* Right: Hardware Status Pills */}
       <div className="flex items-center space-x-2">
-        <div className="flex items-center space-x-1.5 bg-[#1E3E6D]/80 px-2 py-0.5 rounded border border-blue-400/20">
-          <Camera className="w-3.5 h-3.5 text-green-400" />
-          <span className="text-[11px] font-medium">{cameraStatus}</span>
-        </div>
+        {/* Interactive Camera Pill */}
+        <button
+          type="button"
+          onClick={onOpenCameraSettings}
+          className="flex items-center space-x-1.5 bg-[#1E3E6D]/90 hover:bg-[#1E3E6D] hover:border-blue-300 px-2.5 py-0.5 rounded border border-blue-400/30 text-[11px] font-medium transition-colors cursor-pointer group shadow-inner"
+          title="Click to Configure Camera Source & Choose Device Index"
+        >
+          <Camera className={`w-3.5 h-3.5 ${isCameraConnected ? 'text-green-400' : 'text-amber-400'} group-hover:scale-110 transition-transform`} />
+          <span className="font-mono font-semibold">{cameraStatus}</span>
+          <Sliders className="w-3 h-3 text-blue-300 ml-0.5 opacity-60 group-hover:opacity-100" />
+        </button>
 
         <div className="flex items-center space-x-1.5 bg-[#1E3E6D]/80 px-2 py-0.5 rounded border border-blue-400/20">
           <Cpu className="w-3.5 h-3.5 text-cyan-300" />

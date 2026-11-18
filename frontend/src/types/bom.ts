@@ -154,3 +154,30 @@ export interface AuditSessionLog {
   snapshot_path: string | null;
   operator_notes: string | null;
 }
+
+export interface CameraDevice {
+  index: number;
+  name: string;
+  resolution: string;
+  available: boolean;
+  is_current: boolean;
+}
+
+export interface CameraDevicesResponse {
+  current_mode: "USB" | "SYNTHETIC" | "RTSP" | "FILE";
+  current_index: number;
+  source_type: string;
+  is_connected: boolean;
+  devices: CameraDevice[];
+}
+
+export interface CameraStatus {
+  status: "CONNECTED" | "WARNING_NO_SIGNAL";
+  mode: "USB" | "SYNTHETIC" | "RTSP" | "FILE";
+  device_index: number;
+  source_type: string;
+  is_connected: boolean;
+  resolution: string;
+  target_fps: number;
+}
+
