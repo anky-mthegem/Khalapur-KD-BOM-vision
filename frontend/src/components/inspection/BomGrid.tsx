@@ -118,7 +118,7 @@ export const BomGrid: React.FC<BomGridProps> = ({
                   <input
                     type="checkbox"
                     checked={it.is_vision_inspected}
-                    onChange={() => onToggleVisionInspected(it.sr_no)}
+                    onChange={() => onToggleVisionInspected(it.id ?? it.sr_no)}
                     className="cursor-pointer rounded text-[#2B579A]"
                     title={it.is_vision_inspected ? "Vision Active" : "Excluded from Vision Gate"}
                   />

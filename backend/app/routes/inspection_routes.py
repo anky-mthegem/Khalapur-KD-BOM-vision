@@ -61,6 +61,23 @@ async def complete_batch_qc_gate():
 async def simulate_item_crossing(part_uid: str, item_name: str = "Simulated Part"):
     """
     Windows 11 Dev Utility: Injects a simulated fastener to cross the conveyor tripwire.
+    Updates in-memory session counts, updates SQLite database, and broadcasts live state via WebSocket.
     """
-    camera_service.trigger_simulated_item(part_uid, item_name)
-    return {"status": "SIMULATED_ITEM_INJECTED", "part_uid": part_uid}
+    try:
+        from datetime import datetime
+        from backend.app.routes.stream_routes import broadcast_event
+        res = tripwire_service.simulate_crossing(part_uid, item_name)
+        
+        # Broadcast crossing and state update to UI
+        await broadcast_event("TRIPWIRE_CROSS", [{
+            "track_id": 9999,
+            "part_uid": part_uid,
+            "item_name": item_name,
+            "new_count": res["new_count"],
+            "timestamp": datetime.utcnow().isoformat()
+        }])
+        await broadcast_event("STATE_UPDATE", res["state"])
+        
+        return {"status": "SIMULATED_ITEM_INJECTED", **res}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

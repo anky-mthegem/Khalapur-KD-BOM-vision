@@ -66,3 +66,24 @@ def test_tripwire_crossing_and_debounce():
     events_f2 = svc.check_tripwire_crossings(tracked_objects_f2, frame_w, frame_h)
     assert len(events_f2) == 0
     assert svc.counts["HOM196273"] == 1
+
+def test_simulate_crossing():
+    svc = TripwireService()
+    svc.active_session_uid = "test-session-sim"
+    svc.counts = {"HOM196273": 1}
+    svc.recipe_items = [
+        {"id": 42, "sr_no": 1, "part_uid": "HOM196273", "item_name": "WOOD SCREW 3.5X15", "drawing_no": "HOM196273", "target_qty": 2, "is_vision_inspected": True}
+    ]
+    res = svc.simulate_crossing("HOM196273", "WOOD SCREW 3.5X15")
+    assert res["new_count"] == 2
+    assert svc.counts["HOM196273"] == 2
+
+def test_sync_item_vision_inspection():
+    svc = TripwireService()
+    svc.recipe_items = [
+        {"id": 101, "sr_no": 1, "part_uid": "HOM196273", "item_name": "WOOD SCREW", "drawing_no": "HOM196273", "target_qty": 2, "is_vision_inspected": True}
+    ]
+    svc.sync_item_vision_inspection(101, False)
+    assert svc.recipe_items[0]["is_vision_inspected"] is False
+    svc.sync_item_vision_inspection(101, True)
+    assert svc.recipe_items[0]["is_vision_inspected"] is True

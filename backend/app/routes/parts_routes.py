@@ -38,7 +38,8 @@ async def update_part(part_uid: str, payload: PartUpdate, db: AsyncSession = Dep
     if payload.item_name is not None:
         part.item_name = payload.item_name
     if payload.drawing_no is not None:
-        part.drawing_no = payload.drawing_no
+        part.drawing_no = payload.drawing_no.strip().upper()
+        part.part_uid = payload.drawing_no.strip().upper()
     if payload.training_status is not None:
         part.training_status = payload.training_status
 

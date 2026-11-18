@@ -15,6 +15,6 @@ names:
   13: HOM195865
   14: EBCO-CNS35-S
   15: PKG-CARTON-470L
-path: C:/Users/anky_/Downloads/Github/Khalapur KD BOM vision/backend/datasets/bom_dataset
+path: backend/datasets/bom_dataset
 train: images/train
 val: images/train

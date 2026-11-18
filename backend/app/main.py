@@ -24,6 +24,11 @@ from backend.app.routes.audit_routes import router as audit_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Capture main running event loop for threadsafe WebSocket broadcasting
+    import asyncio
+    from backend.app.routes import stream_routes
+    stream_routes.main_loop = asyncio.get_running_loop()
+
     # 1. Initialize SQLite Database Schema
     await init_db()
     print("[Main] SQLite database tables initialized.")

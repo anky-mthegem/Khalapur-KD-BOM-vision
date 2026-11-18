@@ -54,6 +54,7 @@ export interface PartCatalogItem {
 }
 
 export interface InspectionItemStatus {
+  id?: number;
   sr_no: number;
   part_uid: string;
   item_name: string;

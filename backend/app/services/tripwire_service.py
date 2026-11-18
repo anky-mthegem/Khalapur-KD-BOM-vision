@@ -210,6 +210,37 @@ class TripwireService:
         except Exception as e:
             print(f"[TripwireService] Error updating session count: {e}")
 
+    def simulate_crossing(self, part_uid: str, item_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Manually injects an item crossing event for testing/simulation.
+        Increments item counter and updates database session record.
+        """
+        with self._lock:
+            if not self.active_session_uid:
+                raise ValueError("No active inspection session is running.")
+            if part_uid in self.counts:
+                self.counts[part_uid] += 1
+            else:
+                self.counts[part_uid] = 1
+            new_count = self.counts[part_uid]
+            self._update_db_count(part_uid, new_count)
+            return {
+                "part_uid": part_uid,
+                "item_name": item_name or part_uid,
+                "new_count": new_count,
+                "state": self.get_current_state()
+            }
+
+    def sync_item_vision_inspection(self, item_id: int, is_vision_inspected: bool):
+        """
+        Syncs in-memory recipe item vision inspection flag when toggled by operator in UI.
+        """
+        with self._lock:
+            for it in self.recipe_items:
+                if it.get("id") == item_id:
+                    it["is_vision_inspected"] = is_vision_inspected
+                    break
+
     def render_tripwire_overlay(self, frame: np.ndarray) -> np.ndarray:
         vis = frame.copy()
         h, w = vis.shape[:2]
@@ -260,6 +291,7 @@ class TripwireService:
                     all_match = False
 
                 items_status.append({
+                    "id": it.get("id"),
                     "sr_no": it["sr_no"],
                     "part_uid": p_uid,
                     "item_name": it["item_name"],

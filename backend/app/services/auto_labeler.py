@@ -85,15 +85,15 @@ class AutoLabelerService:
         # Lookup class IDs from DB by drawing_no, part_uid, or item_name
         with SyncSessionLocal() as db:
             parts = db.query(PartsCatalog).all()
-            dwg_map = {p.drawing_no: p.yolo_class_id for p in parts}
-            part_map = {p.part_uid: p.yolo_class_id for p in parts}
-            name_map = {p.item_name: p.yolo_class_id for p in parts}
+            dwg_map = {p.drawing_no.strip().upper(): p.yolo_class_id for p in parts if p.drawing_no}
+            part_map = {p.part_uid.strip().upper(): p.yolo_class_id for p in parts if p.part_uid}
+            name_map = {p.item_name: p.yolo_class_id for p in parts if p.item_name}
 
             lines = []
             labeled_parts_set = set()
             for ann in annotations:
-                dwg_no = ann.get("drawing_no")
-                part_uid = ann.get("part_uid")
+                dwg_no = (ann.get("drawing_no") or "").strip().upper()
+                part_uid = (ann.get("part_uid") or "").strip().upper()
                 item_name = ann.get("item_name") or ann.get("label")
                 
                 class_id = None

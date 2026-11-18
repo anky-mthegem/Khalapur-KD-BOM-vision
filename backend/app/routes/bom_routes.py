@@ -196,15 +196,22 @@ async def commit_bom_recipe(payload: BomCommitRequest, db: AsyncSession = Depend
             )
 
     # 1. Upsert missing parts in parts_catalog using drawing_no as unique key and part_uid
+    # Pre-fetch existing parts into a local dictionary to prevent duplicate insert errors
+    # if multiple lines in the uploaded BOM reference the same drawing number.
+    existing_parts_res = await db.execute(select(PartsCatalog))
+    existing_parts = {p.drawing_no.strip().upper(): p for p in existing_parts_res.scalars().all() if p.drawing_no}
+
+    max_id_res = await db.execute(select(func.max(PartsCatalog.yolo_class_id)))
+    current_max_id = max_id_res.scalar()
+    next_class_id = 0 if current_max_id is None else current_max_id + 1
+
     for item in payload.items:
         dwg = item.drawing_no.strip().upper()
-        res = await db.execute(select(PartsCatalog).filter_by(drawing_no=dwg))
-        part = res.scalars().first()
-        if not part:
-            max_id_res = await db.execute(select(func.max(PartsCatalog.yolo_class_id)))
-            max_id = max_id_res.scalar()
-            next_class_id = 0 if max_id is None else max_id + 1
-
+        if dwg in existing_parts:
+            part = existing_parts[dwg]
+            part.item_name = item.item_name
+            part.part_uid = dwg
+        else:
             new_part = PartsCatalog(
                 part_uid=dwg,
                 drawing_no=dwg,
@@ -214,11 +221,9 @@ async def commit_bom_recipe(payload: BomCommitRequest, db: AsyncSession = Depend
                 sample_count=0
             )
             db.add(new_part)
-        else:
-            # Keep item_name up to date attached to drawing_no
-            part.item_name = item.item_name
-            part.part_uid = dwg
-    await db.commit()
+            existing_parts[dwg] = new_part
+            next_class_id += 1
+    await db.flush()
 
     # 2. Upsert Recipe
     res = await db.execute(select(BomRecipe).filter_by(master_item_code=payload.master_item_code))
@@ -259,7 +264,6 @@ async def commit_bom_recipe(payload: BomCommitRequest, db: AsyncSession = Depend
 
     await db.commit()
     return {"status": "SUCCESS", "master_item_code": recipe.master_item_code, "total_items": recipe.total_items}
-    return {"status": "SUCCESS", "master_item_code": recipe.master_item_code, "total_items": recipe.total_items}
 
 @router.get("/recipes")
 async def list_recipes(db: AsyncSession = Depends(get_db)):
@@ -296,4 +300,9 @@ async def toggle_vision_inspection(item_id: int, db: AsyncSession = Depends(get_
         recipe.vision_items_count = sum(1 for it in all_items if it.is_vision_inspected)
 
     await db.commit()
+
+    # Synchronize in-memory inspection session if currently active
+    from backend.app.services.tripwire_service import tripwire_service
+    tripwire_service.sync_item_vision_inspection(item.id, item.is_vision_inspected)
+
     return {"id": item.id, "is_vision_inspected": item.is_vision_inspected}

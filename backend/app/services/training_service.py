@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
-from backend.app.config import DATASETS_DIR, WEIGHTS_DIR
+from backend.app.config import DATASETS_DIR, WEIGHTS_DIR, PROJECT_ROOT
 from backend.app.database import SyncSessionLocal
 from backend.app.models.parts import PartsCatalog
 from backend.app.models.training import TrainingRun
@@ -60,8 +60,13 @@ class TrainingService:
             # Use drawing_no as the unique class label in YOLO data.yaml
             names_dict = {p.yolo_class_id: p.drawing_no for p in parts}
 
+        try:
+            dataset_path = DATASETS_DIR.relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            dataset_path = str(DATASETS_DIR.resolve()).replace("\\", "/")
+
         content = {
-            "path": str(DATASETS_DIR.resolve()).replace("\\", "/"),
+            "path": dataset_path,
             "train": "images/train",
             "val": "images/train",  # Fallback to train if val empty
             "names": names_dict

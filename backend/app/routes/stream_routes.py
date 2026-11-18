@@ -18,6 +18,7 @@ from backend.app.config import settings
 router = APIRouter(tags=["Video Stream & WebSockets"])
 
 active_connections: List[WebSocket] = []
+main_loop: Optional[asyncio.AbstractEventLoop] = None
 
 class CameraSwitchRequest(BaseModel):
     mode: str = "USB"  # "USB", "RTSP"
@@ -27,9 +28,10 @@ class CameraSwitchRequest(BaseModel):
     height: Optional[int] = 720
 
 async def broadcast_event(event_type: str, data: Any):
+    """Asynchronously broadcasts events to all active WebSocket clients on the main event loop."""
     payload = {"event": event_type, "data": data, "timestamp": time.time()}
     disconnected = []
-    for ws in active_connections:
+    for ws in list(active_connections):
         try:
             await ws.send_json(payload)
         except Exception:
@@ -37,6 +39,28 @@ async def broadcast_event(event_type: str, data: Any):
     for ws in disconnected:
         if ws in active_connections:
             active_connections.remove(ws)
+
+def broadcast_threadsafe(event_type: str, data: Any):
+    """
+    Safely schedules broadcast_event onto FastAPI's main event loop from background
+    streaming threads (such as generate_mjpeg_stream worker).
+    Prevents cross-loop RuntimeError and client dropouts.
+    """
+    global main_loop
+    if main_loop and main_loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(broadcast_event(event_type, data), main_loop)
+        except Exception as e:
+            print(f"[WebSocket] Threadsafe broadcast failed: {e}")
+    else:
+        # Fallback if loop is not yet captured
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                main_loop = loop
+                asyncio.run_coroutine_threadsafe(broadcast_event(event_type, data), loop)
+        except Exception:
+            pass
 
 def generate_mjpeg_stream():
     """Generates an annotated MJPEG multipart stream."""
@@ -56,9 +80,9 @@ def generate_mjpeg_stream():
         # 2. Check Tripwire crossings & count increments
         cross_events = tripwire_service.check_tripwire_crossings(tracked_objects, w, h)
         if cross_events:
-            # Broadcast crossing to UI WebSocket clients
-            asyncio.run(broadcast_event("TRIPWIRE_CROSS", cross_events))
-            asyncio.run(broadcast_event("STATE_UPDATE", tripwire_service.get_current_state()))
+            # Broadcast crossing to UI WebSocket clients thread-safely
+            broadcast_threadsafe("TRIPWIRE_CROSS", cross_events)
+            broadcast_threadsafe("STATE_UPDATE", tripwire_service.get_current_state())
 
         # 3. Render Tripwire Overlay
         final_frame = tripwire_service.render_tripwire_overlay(annotated_frame)
@@ -152,6 +176,10 @@ async def switch_camera_source(
 
 @router.websocket("/ws/inspection")
 async def websocket_endpoint(websocket: WebSocket):
+    global main_loop
+    if main_loop is None or not main_loop.is_running():
+        main_loop = asyncio.get_running_loop()
+
     await websocket.accept()
     active_connections.append(websocket)
     try:

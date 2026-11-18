@@ -193,12 +193,23 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleToggleVision = async (srNo: number) => {
-    // Optimistic toggle in local view
+  const handleToggleVision = async (itemIdOrSrNo: number) => {
+    // 1. Optimistic toggle in local view
     setSessionState(prev => ({
       ...prev,
-      items: prev.items.map(it => it.sr_no === srNo ? { ...it, is_vision_inspected: !it.is_vision_inspected } : it)
+      items: prev.items.map(it => (it.id === itemIdOrSrNo || it.sr_no === itemIdOrSrNo) ? { ...it, is_vision_inspected: !it.is_vision_inspected } : it)
     }));
+
+    // 2. Persist to backend database and tripwire service
+    const targetItem = sessionState.items.find(it => it.id === itemIdOrSrNo || it.sr_no === itemIdOrSrNo);
+    if (targetItem?.id) {
+      try {
+        await api.toggleVisionInspected(targetItem.id);
+        fetchSessionState();
+      } catch (e) {
+        console.error("Failed to persist vision toggle:", e);
+      }
+    }
   };
 
   return (
