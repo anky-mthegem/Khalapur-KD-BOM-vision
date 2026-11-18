@@ -18,6 +18,7 @@ import { InspectionState, TripwireGeometry, QcVerificationResult, CameraStatus }
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<RibbonTab>('home');
   const [activeMasterCode, setActiveMasterCode] = useState<string>("31162814SD05076");
+  const [activeKitName, setActiveKitName] = useState<string>("HRD PKT FOR MAIN BODY 900W/1200W 560D KREATION X3 (HRD199065)");
   const [activeModelName, setActiveModelName] = useState<string>("yolo26s-obb.pt");
   const [isTripwireEditMode, setIsTripwireEditMode] = useState<boolean>(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
@@ -45,6 +46,17 @@ export const App: React.FC = () => {
   const [totalBatches, setTotalBatches] = useState<number>(12);
   const [passCount, setPassCount] = useState<number>(11);
   const labelingStudioRef = useRef<LabelingStudioTabRef>(null);
+
+  const updateActiveKit = (code: string, desc?: string | null) => {
+    setActiveMasterCode(code);
+    if (desc) {
+      setActiveKitName(desc);
+    } else {
+      api.getRecipe(code).then((r) => {
+        if (r?.description) setActiveKitName(r.description);
+      }).catch(() => {});
+    }
+  };
 
   const handleRibbonCaptureFrame = () => {
     if (activeTab !== 'labeling') {
@@ -76,7 +88,7 @@ export const App: React.FC = () => {
           if (msg.event === 'STATE_UPDATE' || msg.event === 'INIT_STATE') {
             setSessionState(msg.data);
             if (msg.data.master_item_code) {
-              setActiveMasterCode(msg.data.master_item_code);
+              updateActiveKit(msg.data.master_item_code, msg.data.recipe_description);
             }
             if (msg.camera) {
               setCameraStatus(msg.camera);
@@ -123,7 +135,7 @@ export const App: React.FC = () => {
       const state = await api.getCurrentSession();
       setSessionState(state);
       if (state.master_item_code) {
-        setActiveMasterCode(state.master_item_code);
+        updateActiveKit(state.master_item_code, state.recipe_description);
       }
     } catch (e) {
       console.error("Failed to fetch session state:", e);
@@ -142,7 +154,7 @@ export const App: React.FC = () => {
   const handleScanMasterCode = async (code: string) => {
     try {
       const res = await api.startInspection(code);
-      setActiveMasterCode(code);
+      updateActiveKit(code, res.state?.recipe_description);
       setSessionState(res.state);
     } catch (e: any) {
       alert(`Master Code '${code}' not found: ${e.message}`);
@@ -192,7 +204,10 @@ export const App: React.FC = () => {
   return (
     <div className="flex flex-col h-screen w-screen bg-[#F3F2F1] overflow-hidden select-none">
       {/* 1. Top Windows/Office Title Bar */}
-      <TitleBar activeMasterCode={activeMasterCode} />
+      <TitleBar
+        activeMasterCode={activeMasterCode}
+        activeKitName={activeKitName}
+      />
 
       {/* 2. MS Word-Style Ribbon Toolbar */}
       <RibbonToolbar

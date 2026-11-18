@@ -35,6 +35,7 @@ class TripwireService:
                 cls._instance.direction = DEFAULT_TRIPWIRE_DIRECTION
                 cls._instance.active_session_uid: Optional[str] = None
                 cls._instance.active_recipe_code: Optional[str] = None
+                cls._instance.active_recipe_desc: Optional[str] = None
                 cls._instance.recipe_items: List[Dict[str, Any]] = []
                 cls._instance.counts: Dict[str, int] = {}
                 cls._instance.crossed_track_ids: Set[int] = set()
@@ -65,6 +66,7 @@ class TripwireService:
                 if not recipe:
                     raise ValueError(f"Recipe {master_item_code} not found in database.")
 
+                self.active_recipe_desc = recipe.description
                 self.recipe_items = [it.to_dict() for it in recipe.items]
                 for it in self.recipe_items:
                     self.counts[it["part_uid"]] = 0
@@ -273,6 +275,7 @@ class TripwireService:
             return {
                 "session_uid": self.active_session_uid,
                 "master_item_code": self.active_recipe_code,
+                "recipe_description": getattr(self, "active_recipe_desc", None),
                 "total_target": total_target,
                 "total_counted": total_counted,
                 "overall_status": overall_status,

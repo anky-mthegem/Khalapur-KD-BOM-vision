@@ -65,6 +65,7 @@ export interface InspectionItemStatus {
 export interface InspectionState {
   session_uid: string | null;
   master_item_code: string | null;
+  recipe_description?: string | null;
   total_target: number;
   total_counted: number;
   overall_status: "PASS" | "IN_PROGRESS" | "IDLE";
