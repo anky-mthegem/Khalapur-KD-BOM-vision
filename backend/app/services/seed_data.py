@@ -159,8 +159,8 @@ def seed_database_sync(db: Session):
                 item_name=item["item_name"],
                 drawing_no=item["drawing_no"] if item["drawing_no"] != "—" else None,
                 yolo_class_id=next_class_id,
-                training_status="TRAINED" if item["is_vision_inspected"] else "UNTRAINED",
-                sample_count=25 if item["is_vision_inspected"] else 0
+                training_status="UNTRAINED",
+                sample_count=0
             )
             db.add(part)
             db.flush()
@@ -169,6 +169,27 @@ def seed_database_sync(db: Session):
             # Update attributes if needed
             part.item_name = item["item_name"]
             part.drawing_no = item["drawing_no"] if item["drawing_no"] != "—" else None
+
+    # Sync sample counts and training status to reflect real dataset labels on disk
+    from backend.app.config import DATASETS_DIR
+    labels_dir = DATASETS_DIR / "labels" / "train"
+    real_counts = {}
+    if labels_dir.exists():
+        for f in labels_dir.glob("*.txt"):
+            try:
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    tokens = line.strip().split()
+                    if tokens:
+                        cls_idx = int(tokens[0])
+                        real_counts[cls_idx] = real_counts.get(cls_idx, 0) + 1
+            except Exception:
+                pass
+
+    for part in db.query(PartsCatalog).all():
+        real_n = real_counts.get(part.yolo_class_id, 0)
+        part.sample_count = real_n
+        part.training_status = "LABELED" if real_n > 0 else "UNTRAINED"
+
     db.commit()
 
     # 2. Seed Sample BOM Recipe

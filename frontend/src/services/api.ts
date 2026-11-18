@@ -228,10 +228,16 @@ export const api = {
 
   async saveComponent(payload: {
     image_base64: string;
-    item_name: string;
+    item_name?: string;
     drawing_no?: string;
     polygon?: number[][];
     master_item_code?: string;
+    regions?: Array<{
+      item_name: string;
+      part_uid?: string;
+      drawing_no?: string;
+      polygon: number[][];
+    }>;
   }): Promise<any> {
     const res = await fetch(`${API_BASE}/labeling/save-component`, {
       method: 'POST',

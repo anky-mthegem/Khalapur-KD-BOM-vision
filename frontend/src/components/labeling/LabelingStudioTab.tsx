@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Upload,
   Camera,
@@ -17,22 +17,66 @@ import {
   Crosshair,
   Maximize2,
   RotateCcw,
-  Square
+  Square,
+  ZoomIn,
+  ZoomOut,
+  Move,
+  Eye,
+  EyeOff,
+  ChevronLeft,
+  ChevronRight,
+  HelpCircle,
+  Tag,
+  Check,
+  MousePointer,
+  RotateCw
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { PartCatalogItem, DatasetSummary, TrainingStatus, BomRecipe } from '../../types/bom';
 
-interface ProposalBox {
+// 12 Distinct High-Contrast Industrial Label Palette Colors (Label Studio Style)
+const LABEL_COLORS = [
+  '#107C10', // Green
+  '#0078D4', // Blue
+  '#D13438', // Red
+  '#8764B8', // Violet
+  '#008272', // Teal
+  '#E3008C', // Magenta
+  '#FF8C00', // Orange
+  '#004E8C', // Navy
+  '#498205', // Olive
+  '#00B7C3', // Cyan
+  '#A80000', // Dark Red
+  '#6B69D6', // Iris
+];
+
+export const getLabelColor = (index: number) => LABEL_COLORS[index % LABEL_COLORS.length];
+
+export interface AnnotationRegion {
   id: string;
-  polygon: number[][]; // [[x1, y1], [x2, y2], [x3, y3], [x4, y4]] normalized
-  center: [number, number];
+  item_name: string;
+  part_uid: string;
+  drawing_no: string;
+  color: string;
+  // Normalized coordinates (0.0 to 1.0)
+  x: number;
+  y: number;
   width: number;
   height: number;
-  angle: number;
-  area: number;
-  part_uid: string;
-  item_name?: string;
+  angle: number; // in degrees for OBB
+  polygon: number[][]; // 4 points [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+  is_visible: boolean;
 }
+
+interface ImageQueueItem {
+  id: string;
+  name: string;
+  base64: string;
+  file?: File;
+  regions: AnnotationRegion[];
+}
+
+export type ActiveTool = 'rect' | 'obb' | 'select' | 'pan';
 
 interface LabelingStudioTabProps {
   activeMasterCode: string;
@@ -41,36 +85,59 @@ interface LabelingStudioTabProps {
 export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
   activeMasterCode
 }) => {
-  // Image & Canvas state
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [currentFilename, setCurrentFilename] = useState<string>('sample.jpg');
-  const [proposals, setProposals] = useState<ProposalBox[]>([]);
+  // 1. Tool & Canvas Navigation State (Label Studio Viewport)
+  const [activeTool, setActiveTool] = useState<ActiveTool>('rect');
+  const [zoom, setZoom] = useState<number>(1.0);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // 2. Image Queue State (Batch Filmstrip)
+  const [imageQueue, setImageQueue] = useState<ImageQueueItem[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
+
+  // 3. Current Image & Region Annotations
+  const [regions, setRegions] = useState<AnnotationRegion[]>([]);
+  const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+
+  // 4. Active Selected Label from BOM
+  const [activeLabelIndex, setActiveLabelIndex] = useState<number>(0);
   const [selectedItemName, setSelectedItemName] = useState<string>('');
   const [selectedDrawingNo, setSelectedDrawingNo] = useState<string>('');
 
-  // Interactive Click & Drag Drawing State
+  // 5. Drawing & Dragging State
   const [isDrawing, setIsDrawing] = useState(false);
   const [dragStart, setDragStart] = useState<{ nx: number; ny: number } | null>(null);
-  const [draftPolygon, setDraftPolygon] = useState<number[][] | null>(null);
+  const [draftRect, setDraftRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
-  // Data & Dataset state
+  // 6. Resizing / Moving Existing Region
+  const [isTransforming, setIsTransforming] = useState(false);
+  const [transformHandle, setTransformHandle] = useState<string | null>(null); // 'tl', 'tr', 'br', 'bl', 'rotate', 'move'
+  const [transformStart, setTransformStart] = useState<{ nx: number; ny: number; initialRegion: AnnotationRegion } | null>(null);
+
+  // 7. Data & Dataset State
   const [parts, setParts] = useState<PartCatalogItem[]>([]);
   const [activeRecipe, setActiveRecipe] = useState<BomRecipe | null>(null);
   const [datasetSummary, setDatasetSummary] = useState<DatasetSummary | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
-  // Training state
+  // 8. Training State
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus | null>(null);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
   const [showTrainingPanel, setShowTrainingPanel] = useState(false);
 
+  // DOM Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageObjRef = useRef<HTMLImageElement | null>(null);
+  const viewportContainerRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
 
-  // 1. Initial Load: Parts catalog, active recipe items, dataset summary, and training status
+  // Current Active Image in Queue
+  const currentImage = imageQueue[currentImageIndex] || null;
+
+  // Load Parts & Recipes
   const loadData = async () => {
     try {
       const [partsList, summary, trainStatus] = await Promise.all([
@@ -86,7 +153,6 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
         try {
           const recipe = await api.getRecipe(activeMasterCode);
           setActiveRecipe(recipe);
-          // Default selection to first vision inspected item
           const firstVision = recipe.items.find((it) => it.is_vision_inspected);
           if (firstVision && !selectedItemName) {
             setSelectedItemName(firstVision.item_name);
@@ -123,78 +189,163 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   }, [trainingStatus?.logs]);
 
-  // 2. Handle Image File Selection (Browse button)
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setCurrentFilename(file.name);
-      setIsProcessing(true);
-      setNotification(null);
+  // Available label items from BOM
+  const availableItems = activeRecipe
+    ? activeRecipe.items.filter((it) => it.is_vision_inspected)
+    : parts.map((p, idx) => ({
+        sr_no: idx + 1,
+        item_name: p.item_name,
+        drawing_no: p.drawing_no,
+        target_qty: 1,
+        is_vision_inspected: true
+      }));
 
-      try {
-        const res = await api.uploadComponentImage(file);
-        setImageBase64(res.image_base64);
-
-        // If backend returned contour proposals, use them; otherwise create default centered box
-        let boxes = res.proposals || [];
-        if (boxes.length === 0) {
-          boxes = [{
-            id: 'box_default',
-            polygon: [[0.15, 0.15], [0.85, 0.15], [0.85, 0.85], [0.15, 0.85]],
-            center: [0.5, 0.5],
-            width: 0.7,
-            height: 0.7,
-            angle: 0,
-            area: 0.49,
-            part_uid: selectedDrawingNo || selectedItemName,
-            item_name: selectedItemName
-          }];
-        } else {
-          boxes = boxes.map((b: any) => ({
-            ...b,
-            item_name: selectedItemName,
-            part_uid: selectedDrawingNo || selectedItemName
-          }));
-        }
-
-        setProposals(boxes);
-
-        const img = new Image();
-        img.src = res.image_base64;
-        img.onload = () => {
-          imageObjRef.current = img;
-          drawCanvas(boxes);
-        };
-      } catch (err: any) {
-        setNotification({ type: 'error', message: 'Failed to read image: ' + err.message });
-      } finally {
-        setIsProcessing(false);
-      }
+  // Auto-select first label if none chosen
+  useEffect(() => {
+    if (availableItems.length > 0 && !selectedItemName) {
+      setSelectedItemName(availableItems[0].item_name);
+      setSelectedDrawingNo(availableItems[0].drawing_no || '');
+      setActiveLabelIndex(0);
     }
+  }, [availableItems, selectedItemName]);
+
+  // Load Active Image onto Canvas
+  useEffect(() => {
+    if (!currentImage) {
+      imageObjRef.current = null;
+      setRegions([]);
+      setSelectedRegionId(null);
+      return;
+    }
+
+    const img = new Image();
+    img.src = currentImage.base64;
+    img.onload = () => {
+      imageObjRef.current = img;
+      setRegions(currentImage.regions || []);
+      setSelectedRegionId(null);
+      // Center & fit image
+      resetZoomAndPan();
+    };
+  }, [currentImageIndex, imageQueue.length]);
+
+  // Redraw Canvas whenever regions, draft, selected box, zoom, or pan changes
+  useEffect(() => {
+    drawCanvas();
+  }, [regions, draftRect, selectedRegionId, zoom, pan]);
+
+  // Reset Zoom and Fit to Screen
+  const resetZoomAndPan = () => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
   };
 
-  // 3. Optional: Capture from Live Camera
+  // 1. Image File Upload (Browse button - Supports multiple images)
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const files = Array.from(e.target.files);
+    setIsProcessing(true);
+    setNotification(null);
+
+    const newQueueItems: ImageQueueItem[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const res = await api.uploadComponentImage(file);
+        
+        // Convert any backend contour proposals into regions with the active label
+        const initialRegions: AnnotationRegion[] = (res.proposals || []).map((b: any, idx: number) => {
+          const poly = b.polygon || [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+          const xs = poly.map((p: number[]) => p[0]);
+          const ys = poly.map((p: number[]) => p[1]);
+          const minX = Math.min(...xs);
+          const minY = Math.min(...ys);
+          const maxX = Math.max(...xs);
+          const maxY = Math.max(...ys);
+          return {
+            id: `reg_${Date.now()}_${idx}`,
+            item_name: selectedItemName || 'COMPONENT',
+            part_uid: selectedDrawingNo || selectedItemName,
+            drawing_no: selectedDrawingNo,
+            color: getLabelColor(activeLabelIndex),
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY,
+            angle: b.angle || 0,
+            polygon: poly,
+            is_visible: true
+          };
+        });
+
+        newQueueItems.push({
+          id: `img_${Date.now()}_${i}`,
+          name: file.name,
+          base64: res.image_base64,
+          file,
+          regions: initialRegions
+        });
+      } catch (err: any) {
+        console.error("Failed uploading image:", file.name, err);
+      }
+    }
+
+    if (newQueueItems.length > 0) {
+      setImageQueue((prev) => [...prev, ...newQueueItems]);
+      setCurrentImageIndex(imageQueue.length); // Jump to first newly added image
+      setNotification({
+        type: 'success',
+        message: `Loaded ${newQueueItems.length} image(s) into labeling queue. Select a label and draw boxes.`
+      });
+    } else {
+      setNotification({ type: 'error', message: 'Failed to read selected image file(s).' });
+    }
+
+    setIsProcessing(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // 2. Camera Frame Capture
   const handleCaptureCamera = async () => {
     setIsProcessing(true);
     setNotification(null);
     try {
       const data = await api.captureFrame();
-      setImageBase64(data.image_base64);
-      setCurrentFilename(`camera_capture_${Date.now()}.jpg`);
+      const initialRegions: AnnotationRegion[] = (data.proposals || []).map((b: any, idx: number) => {
+        const poly = b.polygon || [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+        const xs = poly.map((p: number[]) => p[0]);
+        const ys = poly.map((p: number[]) => p[1]);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const maxX = Math.max(...xs);
+        const maxY = Math.max(...ys);
+        return {
+          id: `reg_cam_${Date.now()}_${idx}`,
+          item_name: selectedItemName || 'COMPONENT',
+          part_uid: selectedDrawingNo || selectedItemName,
+          drawing_no: selectedDrawingNo,
+          color: getLabelColor(activeLabelIndex),
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY,
+          angle: b.angle || 0,
+          polygon: poly,
+          is_visible: true
+        };
+      });
 
-      const boxes = (data.proposals || []).map((b: any) => ({
-        ...b,
-        item_name: selectedItemName,
-        part_uid: selectedDrawingNo || selectedItemName
-      }));
-      setProposals(boxes);
-
-      const img = new Image();
-      img.src = data.image_base64;
-      img.onload = () => {
-        imageObjRef.current = img;
-        drawCanvas(boxes);
+      const newItem: ImageQueueItem = {
+        id: `img_cam_${Date.now()}`,
+        name: `conveyor_capture_${Date.now()}.jpg`,
+        base64: data.image_base64,
+        regions: initialRegions
       };
+
+      setImageQueue((prev) => [...prev, newItem]);
+      setCurrentImageIndex(imageQueue.length);
+      setNotification({ type: 'success', message: 'Live camera frame added to annotation queue.' });
     } catch (e: any) {
       setNotification({ type: 'error', message: 'Camera frame capture failed: ' + e.message });
     } finally {
@@ -202,128 +353,273 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // 4. One-Click Box Utilities
-  const handleAutoContours = async () => {
-    if (!imageBase64) return;
-    setIsProcessing(true);
-    try {
-      const data = await api.autoAnnotate(60, 5, 200, 50000);
-      const boxes = (data.proposals || []).map((b: any) => ({
-        ...b,
-        item_name: selectedItemName,
-        part_uid: selectedDrawingNo || selectedItemName
-      }));
-      setProposals(boxes);
-      drawCanvas(boxes);
-      setNotification({ type: 'success', message: `OpenCV auto-detected ${boxes.length} box(es).` });
-    } catch (e: any) {
-      setNotification({ type: 'error', message: 'Auto-contour failed: ' + e.message });
-    } finally {
-      setIsProcessing(false);
+  // 3. Label Palette Selector (Hotkeys & Click)
+  const handleSelectLabel = (it: any, index: number) => {
+    setActiveLabelIndex(index);
+    setSelectedItemName(it.item_name);
+    setSelectedDrawingNo(it.drawing_no || '');
+
+    // Label Studio feature: If a region is currently selected, immediately update its label!
+    if (selectedRegionId) {
+      setRegions((prev) =>
+        prev.map((r) =>
+          r.id === selectedRegionId
+            ? {
+                ...r,
+                item_name: it.item_name,
+                part_uid: it.drawing_no || it.item_name,
+                drawing_no: it.drawing_no || '',
+                color: getLabelColor(index)
+              }
+            : r
+        )
+      );
+      setNotification({ type: 'info', message: `Updated selected box label to "${it.item_name}"` });
     }
   };
 
-  const handleSetFullImageBox = () => {
-    if (!imageBase64) return;
-    const fullBox: ProposalBox = {
-      id: `box_full_${Date.now()}`,
-      polygon: [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]],
-      center: [0.5, 0.5],
-      width: 0.9,
-      height: 0.9,
-      angle: 0,
-      area: 0.81,
-      part_uid: selectedDrawingNo || selectedItemName,
-      item_name: selectedItemName
-    };
-    setProposals([fullBox]);
-    drawCanvas([fullBox]);
-    setNotification({ type: 'success', message: 'Box set to cover the component frame.' });
-  };
-
-  const handleClearBox = () => {
-    setProposals([]);
-    drawCanvas([]);
-    setNotification({ type: 'success', message: 'Box cleared. Click and drag on the image to draw a new box.' });
-  };
-
-  // 5. Interactive Mouse Coordinates Helper
-  const getNormalizedCoordinates = (e: React.MouseEvent<HTMLCanvasElement>): { nx: number; ny: number } => {
+  // 4. Coordinates Mapping (Converts Client Mouse Position to Normalized [0.0 - 1.0] Image Coordinates)
+  const getNormalizedPoint = (e: React.MouseEvent<HTMLCanvasElement>): { nx: number; ny: number } => {
     const canvas = canvasRef.current;
-    if (!canvas) return { nx: 0, ny: 0 };
+    if (!canvas || !imageObjRef.current) return { nx: 0, ny: 0 };
     const rect = canvas.getBoundingClientRect();
-    const nx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const ny = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+    // Map mouse click relative to canvas element
+    const canvasX = (e.clientX - rect.left);
+    const canvasY = (e.clientY - rect.top);
+
+    const nx = Math.max(0, Math.min(1, canvasX / rect.width));
+    const ny = Math.max(0, Math.min(1, canvasY / rect.height));
     return { nx, ny };
   };
 
-  // 6. Interactive Click & Drag Handlers
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!imageBase64) return;
-    e.preventDefault();
-    const { nx, ny } = getNormalizedCoordinates(e);
-    setIsDrawing(true);
-    setDragStart({ nx, ny });
-  };
+  // Check if click hits a region or handle
+  const hitTestRegion = (nx: number, ny: number): { region: AnnotationRegion | null; handle: string | null } => {
+    if (!imageObjRef.current) return { region: null, handle: null };
+    const handleThreshold = 0.03; // ~3% of image width
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !dragStart || !canvasRef.current || !imageObjRef.current) return;
-    const { nx, ny } = getNormalizedCoordinates(e);
+    // Check selected region's corner handles first
+    if (selectedRegionId) {
+      const sel = regions.find((r) => r.id === selectedRegionId);
+      if (sel) {
+        // Handles: tl, tr, br, bl, rotate
+        const corners = [
+          { handle: 'tl', x: sel.x, y: sel.y },
+          { handle: 'tr', x: sel.x + sel.width, y: sel.y },
+          { handle: 'br', x: sel.x + sel.width, y: sel.y + sel.height },
+          { handle: 'bl', x: sel.x, y: sel.y + sel.height },
+          { handle: 'rotate', x: sel.x + sel.width / 2, y: sel.y - 0.04 }
+        ];
 
-    const x1 = Math.min(dragStart.nx, nx);
-    const y1 = Math.min(dragStart.ny, ny);
-    const x2 = Math.max(dragStart.nx, nx);
-    const y2 = Math.max(dragStart.ny, ny);
-
-    const draftPoly = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
-    setDraftPolygon(draftPoly);
-
-    // Live redraw with active draft box
-    drawCanvas(proposals, draftPoly);
-  };
-
-  const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !dragStart) return;
-    const { nx, ny } = getNormalizedCoordinates(e);
-
-    const x1 = Math.min(dragStart.nx, nx);
-    const y1 = Math.min(dragStart.ny, ny);
-    const x2 = Math.max(dragStart.nx, nx);
-    const y2 = Math.max(dragStart.ny, ny);
-
-    const width = x2 - x1;
-    const height = y2 - y1;
-
-    // Minimum size threshold (2% of image dimension) to prevent accidental clicks
-    if (width > 0.02 && height > 0.02) {
-      const newBox: ProposalBox = {
-        id: `box_user_${Date.now()}`,
-        polygon: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
-        center: [(x1 + x2) / 2, (y1 + y2) / 2],
-        width,
-        height,
-        angle: 0,
-        area: width * height,
-        part_uid: selectedDrawingNo || selectedItemName,
-        item_name: selectedItemName
-      };
-
-      const updated = [newBox];
-      setProposals(updated);
-      drawCanvas(updated, null);
-      setNotification({
-        type: 'success',
-        message: `Created box (${Math.round(width * 100)}% × ${Math.round(height * 100)}%). Ready to add to training folder.`
-      });
+        for (const c of corners) {
+          const dist = Math.hypot(nx - c.x, ny - c.y);
+          if (dist < handleThreshold) {
+            return { region: sel, handle: c.handle };
+          }
+        }
+      }
     }
 
-    setIsDrawing(false);
-    setDragStart(null);
-    setDraftPolygon(null);
+    // Check click inside any visible region (reverse order to pick topmost)
+    for (let i = regions.length - 1; i >= 0; i--) {
+      const r = regions[i];
+      if (!r.is_visible) continue;
+      if (nx >= r.x && nx <= r.x + r.width && ny >= r.y && ny <= r.y + r.height) {
+        return { region: r, handle: 'move' };
+      }
+    }
+
+    return { region: null, handle: null };
   };
 
-  // 7. Draw Canvas with High-Contrast Bounding Box, Corner Handles & Label Banner
-  const drawCanvas = (boxes: ProposalBox[], activeDraft: number[][] | null = null) => {
+  // 5. Canvas Mouse Events
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!imageObjRef.current) return;
+
+    // Pan with Middle Click or when Pan tool active
+    if (activeTool === 'pan' || e.button === 1) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      return;
+    }
+
+    const { nx, ny } = getNormalizedPoint(e);
+
+    // If Select Tool Active
+    if (activeTool === 'select') {
+      const { region, handle } = hitTestRegion(nx, ny);
+      if (region) {
+        setSelectedRegionId(region.id);
+        if (handle) {
+          setIsTransforming(true);
+          setTransformHandle(handle);
+          setTransformStart({ nx, ny, initialRegion: { ...region } });
+        }
+      } else {
+        setSelectedRegionId(null);
+      }
+      return;
+    }
+
+    // If Rectangle (BBox) or OBB Tool Active: Start Drawing
+    if (activeTool === 'rect' || activeTool === 'obb') {
+      // Check if user clicked an existing region's handle to resize
+      const { region, handle } = hitTestRegion(nx, ny);
+      if (region && region.id === selectedRegionId && handle && handle !== 'move') {
+        setIsTransforming(true);
+        setTransformHandle(handle);
+        setTransformStart({ nx, ny, initialRegion: { ...region } });
+        return;
+      }
+
+      setIsDrawing(true);
+      setDragStart({ nx, ny });
+      setDraftRect({ x: nx, y: ny, w: 0, h: 0 });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isPanning) {
+      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+      return;
+    }
+
+    const { nx, ny } = getNormalizedPoint(e);
+
+    // Transforming (Moving / Resizing / Rotating existing region)
+    if (isTransforming && transformStart && selectedRegionId) {
+      const deltaX = nx - transformStart.nx;
+      const deltaY = ny - transformStart.ny;
+      const orig = transformStart.initialRegion;
+
+      setRegions((prev) =>
+        prev.map((r) => {
+          if (r.id !== selectedRegionId) return r;
+
+          let newX = orig.x;
+          let newY = orig.y;
+          let newW = orig.width;
+          let newH = orig.height;
+          let newAngle = orig.angle;
+
+          if (transformHandle === 'move') {
+            newX = Math.max(0, Math.min(1 - orig.width, orig.x + deltaX));
+            newY = Math.max(0, Math.min(1 - orig.height, orig.y + deltaY));
+          } else if (transformHandle === 'br') {
+            newW = Math.max(0.02, orig.width + deltaX);
+            newH = Math.max(0.02, orig.height + deltaY);
+          } else if (transformHandle === 'tl') {
+            newX = Math.min(orig.x + orig.width - 0.02, orig.x + deltaX);
+            newY = Math.min(orig.y + orig.height - 0.02, orig.y + deltaY);
+            newW = orig.width - (newX - orig.x);
+            newH = orig.height - (newY - orig.y);
+          } else if (transformHandle === 'tr') {
+            newY = Math.min(orig.y + orig.height - 0.02, orig.y + deltaY);
+            newW = Math.max(0.02, orig.width + deltaX);
+            newH = orig.height - (newY - orig.y);
+          } else if (transformHandle === 'bl') {
+            newX = Math.min(orig.x + orig.width - 0.02, orig.x + deltaX);
+            newW = orig.width - (newX - orig.x);
+            newH = Math.max(0.02, orig.height + deltaY);
+          } else if (transformHandle === 'rotate') {
+            const centerX = orig.x + orig.width / 2;
+            const centerY = orig.y + orig.height / 2;
+            const rad = Math.atan2(ny - centerY, nx - centerX);
+            newAngle = Math.round((rad * 180) / Math.PI + 90) % 360;
+          }
+
+          const polygon = [
+            [newX, newY],
+            [newX + newW, newY],
+            [newX + newW, newY + newH],
+            [newX, newY + newH]
+          ];
+
+          return {
+            ...r,
+            x: newX,
+            y: newY,
+            width: newW,
+            height: newH,
+            angle: newAngle,
+            polygon
+          };
+        })
+      );
+      return;
+    }
+
+    // Drawing new box
+    if (isDrawing && dragStart) {
+      const x1 = Math.min(dragStart.nx, nx);
+      const y1 = Math.min(dragStart.ny, ny);
+      const x2 = Math.max(dragStart.nx, nx);
+      const y2 = Math.max(dragStart.ny, ny);
+      setDraftRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (isPanning) {
+      setIsPanning(false);
+      return;
+    }
+
+    if (isTransforming) {
+      setIsTransforming(false);
+      setTransformHandle(null);
+      setTransformStart(null);
+      return;
+    }
+
+    if (isDrawing && draftRect) {
+      // Minimum size: 2% width & height
+      if (draftRect.w > 0.02 && draftRect.h > 0.02) {
+        const poly = [
+          [draftRect.x, draftRect.y],
+          [draftRect.x + draftRect.w, draftRect.y],
+          [draftRect.x + draftRect.w, draftRect.y + draftRect.h],
+          [draftRect.x, draftRect.y + draftRect.h]
+        ];
+
+        const newRegion: AnnotationRegion = {
+          id: `reg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          item_name: selectedItemName || 'COMPONENT',
+          part_uid: selectedDrawingNo || selectedItemName,
+          drawing_no: selectedDrawingNo,
+          color: getLabelColor(activeLabelIndex),
+          x: draftRect.x,
+          y: draftRect.y,
+          width: draftRect.w,
+          height: draftRect.h,
+          angle: 0,
+          polygon: poly,
+          is_visible: true
+        };
+
+        const updated = [...regions, newRegion];
+        setRegions(updated);
+        setSelectedRegionId(newRegion.id);
+
+        // Keep image queue updated with regions
+        if (imageQueue[currentImageIndex]) {
+          imageQueue[currentImageIndex].regions = updated;
+        }
+
+        setNotification({
+          type: 'success',
+          message: `Created box for "${newRegion.item_name}" (${Math.round(draftRect.w * 100)}% × ${Math.round(draftRect.h * 100)}%)`
+        });
+      }
+
+      setIsDrawing(false);
+      setDragStart(null);
+      setDraftRect(null);
+    }
+  };
+
+  // 6. Draw Canvas with High-Precision Oriented Boxes, Corner Handles & Tags
+  const drawCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas || !imageObjRef.current) return;
     const ctx = canvas.getContext('2d');
@@ -332,97 +628,136 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     canvas.width = imageObjRef.current.width;
     canvas.height = imageObjRef.current.height;
 
-    // 1. Draw base photo
+    // A. Draw pristine background image
     ctx.drawImage(imageObjRef.current, 0, 0);
 
-    // 2. Draw confirmed boxes
-    boxes.forEach((b) => {
-      const pts = b.polygon.map(([nx, ny]) => [nx * canvas.width, ny * canvas.height]);
-      if (pts.length >= 4) {
-        ctx.beginPath();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#107C10'; // Plant Green
+    // B. Draw All Regions
+    regions.forEach((r) => {
+      if (!r.is_visible) return;
+      const isSelected = r.id === selectedRegionId;
+      const color = r.color || '#107C10';
 
-        ctx.moveTo(pts[0][0], pts[0][1]);
-        for (let i = 1; i < pts.length; i++) {
-          ctx.lineTo(pts[i][0], pts[i][1]);
-        }
-        ctx.closePath();
-        ctx.stroke();
+      const px = r.x * canvas.width;
+      const py = r.y * canvas.height;
+      const pw = r.width * canvas.width;
+      const ph = r.height * canvas.height;
 
-        // Translucent highlight fill
-        ctx.fillStyle = 'rgba(16, 124, 16, 0.18)';
-        ctx.fill();
+      ctx.save();
 
-        // Corner grab handle circles
-        pts.forEach(([px, py]) => {
-          ctx.beginPath();
-          ctx.arc(px, py, 5, 0, Math.PI * 2);
+      // Handle OBB Angle Rotation
+      if (r.angle !== 0) {
+        const cx = px + pw / 2;
+        const cy = py + ph / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate((r.angle * Math.PI) / 180);
+        ctx.translate(-cx, -cy);
+      }
+
+      // Box Boundary Stroke
+      ctx.beginPath();
+      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.strokeStyle = isSelected ? '#FFFFFF' : color;
+      ctx.strokeRect(px, py, pw, ph);
+
+      // Inner stroke for high contrast on bright/dark backgrounds
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = color;
+      ctx.strokeRect(px, py, pw, ph);
+
+      // Translucent Fill
+      ctx.fillStyle = isSelected ? `${color}40` : `${color}20`; // 25% or 12% opacity
+      ctx.fillRect(px, py, pw, ph);
+
+      // Top-Left Label Badge (Label Studio Tag Style)
+      const labelText = r.item_name ? r.item_name.slice(0, 32) : 'UNTITLED';
+      ctx.font = 'bold 11px sans-serif';
+      const textWidth = ctx.measureText(labelText).width;
+
+      ctx.fillStyle = color;
+      ctx.fillRect(px, Math.max(0, py - 22), textWidth + 16, 22);
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(labelText, px + 8, Math.max(15, py - 6));
+
+      // Draw Corner Transform Handles if Selected
+      if (isSelected) {
+        const handleSize = 8;
+        const half = handleSize / 2;
+
+        const handles = [
+          [px, py],
+          [px + pw, py],
+          [px + pw, py + ph],
+          [px, py + ph],
+          [px + pw / 2, py],
+          [px + pw / 2, py + ph],
+          [px, py + ph / 2],
+          [px + pw, py + ph / 2]
+        ];
+
+        handles.forEach(([hx, hy]) => {
           ctx.fillStyle = '#FFFFFF';
-          ctx.fill();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = '#107C10';
-          ctx.stroke();
+          ctx.fillRect(hx - half, hy - half, handleSize, handleSize);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(hx - half, hy - half, handleSize, handleSize);
         });
 
-        // Top label badge
-        const cx = Math.min(...pts.map((p) => p[0]));
-        const cy = Math.min(...pts.map((p) => p[1]));
-        const labelText = selectedItemName ? selectedItemName.slice(0, 36) : 'SELECT ITEM NAME (LABEL)';
+        // Rotation Handle (Stem & Circle)
+        const rotX = px + pw / 2;
+        const rotY = py - 26;
+        ctx.beginPath();
+        ctx.moveTo(px + pw / 2, py);
+        ctx.lineTo(rotX, rotY);
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
 
-        ctx.fillStyle = '#107C10';
-        ctx.fillRect(Math.max(10, cx), Math.max(18, cy - 22), 240, 22);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(labelText, Math.max(14, cx + 4), Math.max(34, cy - 7));
+        ctx.beginPath();
+        ctx.arc(rotX, rotY, 5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.stroke();
       }
+
+      ctx.restore();
     });
 
-    // 3. Draw live click-and-drag draft box (if currently dragging)
-    if (activeDraft && activeDraft.length >= 4) {
-      const draftPts = activeDraft.map(([nx, ny]) => [nx * canvas.width, ny * canvas.height]);
+    // C. Draw Live Click & Drag Draft Box
+    if (draftRect && draftRect.w > 0 && draftRect.h > 0) {
+      const dpx = draftRect.x * canvas.width;
+      const dpy = draftRect.y * canvas.height;
+      const dpw = draftRect.w * canvas.width;
+      const dph = draftRect.h * canvas.height;
+
       ctx.beginPath();
-      ctx.lineWidth = 3;
-      ctx.setLineDash([8, 4]); // Dashed line while drawing
-      ctx.strokeStyle = '#00E5FF'; // Vibrant Cyan for live drag
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.strokeStyle = '#00E5FF'; // Vibrant Cyan
+      ctx.strokeRect(dpx, dpy, dpw, dph);
+      ctx.setLineDash([]);
 
-      ctx.moveTo(draftPts[0][0], draftPts[0][1]);
-      for (let i = 1; i < draftPts.length; i++) {
-        ctx.lineTo(draftPts[i][0], draftPts[i][1]);
-      }
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]); // Reset dash
+      ctx.fillStyle = 'rgba(0, 229, 255, 0.18)';
+      ctx.fillRect(dpx, dpy, dpw, dph);
 
-      ctx.fillStyle = 'rgba(0, 229, 255, 0.15)';
-      ctx.fill();
-
-      // Dimension guide badge
-      const dw = Math.abs(draftPts[1][0] - draftPts[0][0]);
-      const dh = Math.abs(draftPts[2][1] - draftPts[1][1]);
-      const minX = Math.min(...draftPts.map((p) => p[0]));
-      const minY = Math.min(...draftPts.map((p) => p[1]));
-
+      // Dimension Pill
       ctx.fillStyle = '#004B50';
-      ctx.fillRect(minX, Math.max(10, minY - 18), 120, 18);
+      ctx.fillRect(dpx, Math.max(0, dpy - 18), 110, 18);
       ctx.fillStyle = '#00E5FF';
       ctx.font = 'bold 10px monospace';
-      ctx.fillText(`${Math.round(dw)} × ${Math.round(dh)} px`, minX + 6, Math.max(24, minY - 5));
+      ctx.fillText(`${Math.round(dpw)} × ${Math.round(dph)} px`, dpx + 6, Math.max(13, dpy - 5));
     }
   };
 
-  // 8. Save Component Image & Label to Training Folder
+  // 7. Save Annotations to YOLO Training Folder
   const handleSaveToTraining = async () => {
-    if (!imageBase64) {
-      setNotification({ type: 'error', message: 'Please browse or capture a component image first.' });
+    if (!currentImage) {
+      setNotification({ type: 'error', message: 'No component image loaded to save.' });
       return;
     }
-    if (!selectedItemName) {
-      setNotification({ type: 'error', message: 'Please select an Item Name from the BOM dropdown on the right.' });
-      return;
-    }
-    if (proposals.length === 0) {
-      setNotification({ type: 'error', message: 'Please create a box around the object first (click & drag on image, or click "Auto Box").' });
+    if (regions.length === 0) {
+      setNotification({ type: 'error', message: 'Please draw at least one bounding box on the image first.' });
       return;
     }
 
@@ -430,28 +765,34 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     setNotification(null);
 
     try {
-      const activePolygon = proposals[0].polygon;
-
-      await api.saveComponent({
-        image_base64: imageBase64,
-        item_name: selectedItemName,
-        drawing_no: selectedDrawingNo,
-        polygon: activePolygon,
-        master_item_code: activeMasterCode
+      const res = await api.saveComponent({
+        image_base64: currentImage.base64,
+        master_item_code: activeMasterCode,
+        regions: regions.map((r) => ({
+          item_name: r.item_name,
+          part_uid: r.drawing_no || r.part_uid || r.item_name,
+          drawing_no: r.drawing_no,
+          polygon: r.polygon
+        }))
       });
 
       setNotification({
         type: 'success',
-        message: `Saved component image for "${selectedItemName}" directly into training folder!`
+        message: `Saved image '${currentImage.name}' with ${regions.length} labeled box(es) into YOLO training folder!`
       });
 
-      // Refresh dataset summary and parts catalog counts
+      // Update Summary & Parts Catalog
       const [newSummary, partsList] = await Promise.all([
         api.getDatasetSummary(),
         api.listParts()
       ]);
       setDatasetSummary(newSummary);
       setParts(partsList);
+
+      // Auto-advance to next image in queue if available
+      if (currentImageIndex < imageQueue.length - 1) {
+        setCurrentImageIndex((prev) => prev + 1);
+      }
     } catch (e: any) {
       setNotification({ type: 'error', message: 'Error saving component: ' + e.message });
     } finally {
@@ -459,19 +800,80 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // 9. Delete sample from training folder
-  const handleDeleteSample = async (stem: string) => {
+  // 8. Auto-Detect Fastener Contours (OpenCV)
+  const handleAutoContours = async () => {
+    if (!currentImage) return;
+    setIsProcessing(true);
     try {
-      await api.deleteSample(stem);
-      const summary = await api.getDatasetSummary();
-      setDatasetSummary(summary);
-      setNotification({ type: 'success', message: `Deleted sample '${stem}' from training folder.` });
+      const data = await api.autoAnnotate(60, 5, 200, 50000);
+      const newRegions: AnnotationRegion[] = (data.proposals || []).map((b: any, idx: number) => {
+        const poly = b.polygon || [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+        const xs = poly.map((p: number[]) => p[0]);
+        const ys = poly.map((p: number[]) => p[1]);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const maxX = Math.max(...xs);
+        const maxY = Math.max(...ys);
+        return {
+          id: `reg_auto_${Date.now()}_${idx}`,
+          item_name: selectedItemName || 'COMPONENT',
+          part_uid: selectedDrawingNo || selectedItemName,
+          drawing_no: selectedDrawingNo,
+          color: getLabelColor(activeLabelIndex),
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY,
+          angle: b.angle || 0,
+          polygon: poly,
+          is_visible: true
+        };
+      });
+
+      setRegions((prev) => [...prev, ...newRegions]);
+      setNotification({ type: 'success', message: `OpenCV detected ${newRegions.length} component proposal(s).` });
     } catch (e: any) {
-      setNotification({ type: 'error', message: 'Failed to delete sample: ' + e.message });
+      setNotification({ type: 'error', message: 'Auto-contour failed: ' + e.message });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  // 10. Trigger YOLO26 Model Training
+  // 9. Full Image Box
+  const handleSetFullImageBox = () => {
+    if (!currentImage) return;
+    const fullRegion: AnnotationRegion = {
+      id: `reg_full_${Date.now()}`,
+      item_name: selectedItemName || 'COMPONENT',
+      part_uid: selectedDrawingNo || selectedItemName,
+      drawing_no: selectedDrawingNo,
+      color: getLabelColor(activeLabelIndex),
+      x: 0.05,
+      y: 0.05,
+      width: 0.9,
+      height: 0.9,
+      angle: 0,
+      polygon: [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]],
+      is_visible: true
+    };
+    setRegions([fullRegion]);
+    setSelectedRegionId(fullRegion.id);
+  };
+
+  // 10. Delete Selected Region
+  const handleDeleteSelected = () => {
+    if (!selectedRegionId) return;
+    setRegions((prev) => prev.filter((r) => r.id !== selectedRegionId));
+    setSelectedRegionId(null);
+  };
+
+  // 11. Clear All Regions
+  const handleClearAll = () => {
+    setRegions([]);
+    setSelectedRegionId(null);
+  };
+
+  // 12. Trigger YOLO26 Model Training
   const handleStartTraining = async () => {
     setIsStartingTraining(true);
     setShowTrainingPanel(true);
@@ -492,128 +894,167 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
     }
   };
 
-  // Available label items
-  const availableItems = activeRecipe
-    ? activeRecipe.items.filter((it) => it.is_vision_inspected)
-    : parts.map((p, idx) => ({
-        sr_no: idx + 1,
-        item_name: p.item_name,
-        drawing_no: p.drawing_no,
-        target_qty: 1,
-        is_vision_inspected: true
-      }));
+  // Keyboard Shortcuts (Label Studio Style: R, V, Delete, Ctrl+Enter)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in input
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+
+      if (e.key === 'r' || e.key === 'R') {
+        setActiveTool('rect');
+      } else if (e.key === 'v' || e.key === 'V') {
+        setActiveTool('select');
+      } else if (e.key === 'h' || e.key === 'H') {
+        setActiveTool('pan');
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedRegionId) {
+          handleDeleteSelected();
+        }
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        handleSaveToTraining();
+      } else if (e.key >= '1' && e.key <= '9') {
+        const idx = parseInt(e.key, 10) - 1;
+        if (idx < availableItems.length) {
+          handleSelectLabel(availableItems[idx], idx);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedRegionId, regions, currentImage, availableItems, activeLabelIndex]);
 
   const isTraining = trainingStatus?.status === 'RUNNING';
-  const isCompleted = trainingStatus?.status === 'COMPLETED';
   const progressPct = trainingStatus && trainingStatus.total_epochs > 0
     ? (trainingStatus.current_epoch / trainingStatus.total_epochs) * 100
     : 0;
 
   return (
     <div className="flex-1 bg-[#F3F2F1] flex flex-col overflow-hidden text-xs select-none">
-      {/* 1. Top Ribbon Action Bar */}
-      <div className="bg-white border-b border-[#D2D0CE] px-4 py-2 flex items-center justify-between shadow-sm">
+      {/* 1. TOP RIBBON TOOLBAR: Action Controls & Training Launch */}
+      <div className="bg-white border-b border-[#D2D0CE] px-3 py-1.5 flex items-center justify-between shadow-sm flex-shrink-0">
         <div className="flex items-center space-x-2">
-          {/* Browse Image Button */}
+          {/* Hidden File Input */}
           <input
             type="file"
             accept="image/*"
+            multiple
             ref={fileInputRef}
             onChange={handleFileChange}
             className="hidden"
           />
+
+          {/* Browse Images Button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isProcessing || isTraining}
-            className="px-3.5 py-1.5 bg-[#107C41] hover:bg-[#0E6032] text-white rounded font-bold flex items-center space-x-1.5 shadow transition"
-            title="Browse and select a component image file from your computer"
+            className="px-3 py-1.5 bg-[#107C41] hover:bg-[#0E6032] text-white rounded font-bold flex items-center space-x-1.5 shadow transition"
+            title="Select single or multiple component image files from your computer"
           >
             <FolderOpen className="w-4 h-4 text-yellow-300" />
-            <span>Browse Component Image</span>
+            <span>Browse Component Images</span>
           </button>
 
-          {/* Capture from Camera */}
+          {/* Camera Capture */}
           <button
             onClick={handleCaptureCamera}
             disabled={isProcessing || isTraining}
             className="px-3 py-1.5 bg-[#2B579A] hover:bg-[#1E3E6D] text-white rounded font-semibold flex items-center space-x-1.5"
-            title="Grab current frame from conveyor camera"
+            title="Capture raw snapshot from conveyor camera"
           >
-            <Camera className="w-4 h-4" />
-            <span>Camera Capture</span>
+            <Camera className="w-4 h-4 text-white" />
+            <span>Capture Frame</span>
           </button>
 
-          <div className="ribbon-divider" />
+          <div className="h-6 w-px bg-gray-300 mx-1" />
 
-          {/* BOX CREATION TOOLS */}
-          <div className="flex items-center space-x-1 bg-gray-100 p-0.5 rounded border border-gray-300">
-            {/* Draw Box / Click & Drag Tool */}
+          {/* TOOL SELECTOR GROUP (Label Studio Toolbar) */}
+          <div className="flex items-center bg-gray-100 p-0.5 rounded border border-gray-300 space-x-0.5">
             <button
-              onClick={() => {
-                setNotification({
-                  type: 'success',
-                  message: 'Draw Box Active: Click and drag with your mouse directly on the image to outline the component.'
-                });
-              }}
-              className="px-3 py-1 bg-white hover:bg-cyan-50 border border-cyan-400 text-cyan-900 rounded font-bold flex items-center space-x-1 shadow-sm"
-              title="Click and drag with mouse on the image to draw a bounding box around any hardware piece"
+              onClick={() => setActiveTool('rect')}
+              className={`px-2.5 py-1 rounded font-bold flex items-center space-x-1 transition ${
+                activeTool === 'rect' ? 'bg-[#2B579A] text-white shadow-sm' : 'text-gray-700 hover:bg-gray-200'
+              }`}
+              title="Rectangle Box Tool (Shortcut: R) - Click & drag on image to draw bounding box"
             >
-              <Crosshair className="w-3.5 h-3.5 text-cyan-700" />
-              <span>Click & Drag Box</span>
+              <Square className="w-3.5 h-3.5" />
+              <span>BBox [R]</span>
             </button>
 
-            {/* Auto Fastener Contours (OpenCV) */}
             <button
-              onClick={handleAutoContours}
-              disabled={!imageBase64 || isProcessing || isTraining}
-              className="px-2.5 py-1 text-gray-700 hover:text-purple-800 hover:bg-purple-50 rounded font-semibold flex items-center space-x-1 disabled:opacity-40"
-              title="Use OpenCV adaptive contour detection to automatically find the fastener's oriented bounding box"
+              onClick={() => setActiveTool('select')}
+              className={`px-2.5 py-1 rounded font-bold flex items-center space-x-1 transition ${
+                activeTool === 'select' ? 'bg-[#2B579A] text-white shadow-sm' : 'text-gray-700 hover:bg-gray-200'
+              }`}
+              title="Select & Transform Tool (Shortcut: V) - Move, resize, or rotate existing boxes"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-              <span>Auto Box</span>
+              <MousePointer className="w-3.5 h-3.5" />
+              <span>Select [V]</span>
             </button>
 
-            {/* Full Image Box */}
             <button
-              onClick={handleSetFullImageBox}
-              disabled={!imageBase64 || isProcessing || isTraining}
-              className="px-2.5 py-1 text-gray-700 hover:text-blue-800 hover:bg-blue-50 rounded font-semibold flex items-center space-x-1 disabled:opacity-40"
-              title="Fit bounding box around the whole component frame"
+              onClick={() => setActiveTool('pan')}
+              className={`px-2 py-1 rounded font-bold flex items-center space-x-1 transition ${
+                activeTool === 'pan' ? 'bg-[#2B579A] text-white shadow-sm' : 'text-gray-700 hover:bg-gray-200'
+              }`}
+              title="Pan Tool (Shortcut: H) - Drag to navigate zoomed image"
             >
-              <Maximize2 className="w-3.5 h-3.5 text-blue-600" />
-              <span>Full Box</span>
-            </button>
-
-            {/* Clear Box */}
-            <button
-              onClick={handleClearBox}
-              disabled={!imageBase64 || proposals.length === 0 || isProcessing || isTraining}
-              className="px-2 py-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded font-semibold disabled:opacity-40"
-              title="Remove existing box so you can redraw a new one"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <Move className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="ribbon-divider" />
+          <div className="h-6 w-px bg-gray-300 mx-1" />
 
-          {/* Save & Add to Training Folder */}
+          {/* AUTO-BOX & SHORTCUT ACTIONS */}
           <button
-            onClick={handleSaveToTraining}
-            disabled={!imageBase64 || proposals.length === 0 || isProcessing || isTraining}
-            className="px-4 py-1.5 bg-[#107C10] hover:bg-[#0E6A0E] text-white rounded font-bold flex items-center space-x-1.5 shadow disabled:opacity-50"
-            title="Store labeled image and annotation txt in training folder"
+            onClick={handleAutoContours}
+            disabled={!currentImage || isProcessing || isTraining}
+            className="px-2.5 py-1 bg-white hover:bg-purple-50 border border-purple-300 text-purple-900 rounded font-semibold flex items-center space-x-1 shadow-sm disabled:opacity-40"
+            title="Auto-detect component bounding boxes using OpenCV contours"
           >
-            <Save className="w-4 h-4 text-white" />
-            <span>Add to Training Folder</span>
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+            <span>Auto Box</span>
           </button>
 
-          {/* Notification Message */}
+          <button
+            onClick={handleSetFullImageBox}
+            disabled={!currentImage || isProcessing || isTraining}
+            className="px-2 py-1 text-gray-700 hover:bg-gray-200 rounded font-medium border border-gray-300 disabled:opacity-40"
+            title="Fit box to entire component photo"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            onClick={handleClearAll}
+            disabled={!currentImage || regions.length === 0 || isProcessing || isTraining}
+            className="px-2 py-1 text-red-600 hover:bg-red-50 rounded font-medium border border-red-200 disabled:opacity-40"
+            title="Clear all drawn boxes on this image"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+
+          <div className="h-6 w-px bg-gray-300 mx-1" />
+
+          {/* SAVE & ADD TO TRAINING FOLDER */}
+          <button
+            onClick={handleSaveToTraining}
+            disabled={!currentImage || regions.length === 0 || isProcessing || isTraining}
+            className="px-4 py-1.5 bg-[#107C10] hover:bg-[#0E6A0E] text-white rounded font-bold flex items-center space-x-1.5 shadow disabled:opacity-50"
+            title="Store labeled image and annotation coordinates in training folder (Shortcut: Ctrl + Enter)"
+          >
+            <Save className="w-4 h-4 text-white" />
+            <span>Save to Training [Ctrl+Enter]</span>
+          </button>
+
+          {/* Feedback Notification Banner */}
           {notification && (
             <div
               className={`flex items-center space-x-1.5 px-3 py-1 rounded border font-semibold ${
                 notification.type === 'success'
                   ? 'bg-green-50 text-[#107C10] border-green-300'
+                  : notification.type === 'info'
+                  ? 'bg-blue-50 text-[#0078D4] border-blue-300'
                   : 'bg-red-50 text-red-700 border-red-300'
               }`}
             >
@@ -627,7 +1068,7 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
           )}
         </div>
 
-        {/* Start Training Button */}
+        {/* Start YOLO26 Model Training Button */}
         <div className="flex items-center space-x-2">
           <button
             onClick={handleStartTraining}
@@ -637,270 +1078,354 @@ export const LabelingStudioTab: React.FC<LabelingStudioTabProps> = ({
                 ? 'bg-amber-600 animate-pulse cursor-not-allowed'
                 : 'bg-[#2B579A] hover:bg-[#1E3E6D]'
             }`}
-            title="Trigger YOLO26 model training on all images stored in the training folder"
+            title="Train YOLO26-OBB model using all labeled component images in training folder"
           >
             <Play className="w-4 h-4 fill-white" />
-            <span>{isTraining ? 'Training in Progress...' : 'Start YOLO26 Model Training'}</span>
+            <span>{isTraining ? 'Training Model...' : 'Start YOLO26 Training'}</span>
           </button>
         </div>
       </div>
 
-      {/* 2. Main Workspace Split */}
+      {/* 2. LABEL STUDIO COLOR-CODED QUICK LABEL PALETTE BAR */}
+      <div className="bg-gray-100 border-b border-gray-300 px-3 py-1.5 flex items-center space-x-2 overflow-x-auto flex-shrink-0">
+        <span className="text-[10px] uppercase font-extrabold text-gray-500 flex items-center space-x-1 flex-shrink-0">
+          <Tag className="w-3 h-3 text-[#2B579A]" />
+          <span>BOM Labels:</span>
+        </span>
+
+        <div className="flex items-center space-x-1.5 flex-1 overflow-x-auto py-0.5">
+          {availableItems.map((it, idx) => {
+            const isSelected = selectedItemName === it.item_name;
+            const color = getLabelColor(idx);
+            const collectedCount = datasetSummary?.parts_summary.find((p) => p.item_name === it.item_name)?.sample_count || 0;
+
+            return (
+              <button
+                key={it.item_name}
+                type="button"
+                onClick={() => handleSelectLabel(it, idx)}
+                style={{
+                  backgroundColor: isSelected ? color : '#FFFFFF',
+                  borderColor: color,
+                  color: isSelected ? '#FFFFFF' : '#1A1A1A'
+                }}
+                className={`px-2.5 py-1 rounded text-xs font-bold border flex items-center space-x-1.5 transition-all shadow-sm flex-shrink-0 ${
+                  isSelected ? 'ring-2 ring-offset-1 ring-blue-500 scale-105' : 'hover:bg-gray-50'
+                }`}
+                title={`[${idx + 1}] ${it.item_name} - ${collectedCount} sample(s) collected`}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-white/60"
+                  style={{ backgroundColor: isSelected ? '#FFFFFF' : color }}
+                />
+                <span className="font-mono text-[10px] opacity-75">#{idx + 1}</span>
+                <span className="truncate max-w-[180px]">{it.item_name}</span>
+                <span
+                  className={`text-[10px] px-1 rounded font-mono ${
+                    isSelected ? 'bg-black/25 text-white' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {collectedCount}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. MAIN WORKSPACE SPLIT: Viewport Canvas (70%) + Label Studio Inspector Panel (30%) */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left (60%): Interactive Component Annotation Canvas */}
-        <div className="flex-1 bg-black flex flex-col items-center justify-center p-3 relative overflow-hidden">
-          {imageBase64 ? (
-            <div className="relative max-h-full max-w-full flex flex-col items-center justify-center overflow-auto">
-              {/* Interactive Helper Prompt Banner */}
-              <div className="absolute top-3 left-4 right-4 z-20 flex justify-between items-center pointer-events-none">
-                <div className="bg-[#107C41]/95 text-white px-3 py-1 rounded shadow-md border border-green-400 text-xs flex items-center space-x-2">
-                  <Crosshair className="w-4 h-4 text-yellow-300" />
-                  <span className="font-bold">
-                    Box Creator Active: Click and drag with mouse to draw a box around the object.
-                  </span>
-                </div>
-                {proposals.length > 0 && (
-                  <div className="bg-black/80 text-green-400 px-2.5 py-1 rounded text-[11px] font-mono border border-green-600">
-                    Box: {Math.round(proposals[0].width * 100)}% × {Math.round(proposals[0].height * 100)}%
-                  </div>
-                )}
+        {/* Left: Annotation Canvas Viewport */}
+        <div
+          ref={viewportContainerRef}
+          className="flex-1 bg-[#1E1E1E] flex flex-col relative overflow-hidden select-none"
+        >
+          {/* Canvas Floating Top Controls: Zoom, Pan, Fit */}
+          <div className="absolute top-3 left-3 z-20 flex items-center space-x-1 bg-black/75 backdrop-blur-sm p-1 rounded border border-gray-700 shadow-md">
+            <button
+              onClick={() => setZoom((z) => Math.min(5.0, z + 0.25))}
+              className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded"
+              title="Zoom In"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+            <span className="text-[11px] font-mono text-yellow-300 px-1 font-bold">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}
+              className="p-1 text-gray-300 hover:text-white hover:bg-gray-700 rounded"
+              title="Zoom Out"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <button
+              onClick={resetZoomAndPan}
+              className="px-2 py-0.5 text-[11px] font-semibold text-gray-300 hover:text-white hover:bg-gray-700 rounded"
+              title="Reset Zoom to Fit"
+            >
+              Fit
+            </button>
+          </div>
+
+          {/* Interactive Canvas Canvas Area */}
+          <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+            {currentImage ? (
+              <div
+                style={{
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  transformOrigin: 'center center',
+                  transition: isPanning ? 'none' : 'transform 0.05s ease-out'
+                }}
+                className="relative flex items-center justify-center cursor-crosshair shadow-2xl"
+              >
+                <canvas
+                  ref={canvasRef}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                  className="rounded border border-gray-600 bg-black block"
+                />
+              </div>
+            ) : (
+              <div className="text-center text-gray-400 p-8 space-y-3">
+                <ImageIcon className="w-16 h-16 mx-auto text-gray-600" />
+                <p className="text-sm font-semibold">No Component Image in Queue</p>
+                <p className="text-xs text-gray-500 max-w-md mx-auto">
+                  Click <strong>"Browse Component Images"</strong> to load single or multiple photos from disk, or grab a frame directly from your <strong>Camera</strong>.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Filmstrip / Image Queue Navigator (Label Studio Pagination) */}
+          {imageQueue.length > 0 && (
+            <div className="h-16 bg-[#252526] border-t border-gray-700 px-3 py-1 flex items-center justify-between flex-shrink-0 z-20">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setCurrentImageIndex((i) => Math.max(0, i - 1))}
+                  disabled={currentImageIndex === 0}
+                  className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-white disabled:opacity-30"
+                  title="Previous Image (Shortcut: A)"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <span className="text-xs font-mono text-gray-300 font-bold">
+                  {currentImageIndex + 1} / {imageQueue.length}
+                </span>
+                <button
+                  onClick={() => setCurrentImageIndex((i) => Math.min(imageQueue.length - 1, i + 1))}
+                  disabled={currentImageIndex === imageQueue.length - 1}
+                  className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-white disabled:opacity-30"
+                  title="Next Image (Shortcut: D)"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
               </div>
 
-              {/* Canvas with Mouse Drag Event Handlers */}
-              <canvas
-                ref={canvasRef}
-                onMouseDown={handleCanvasMouseDown}
-                onMouseMove={handleCanvasMouseMove}
-                onMouseUp={handleCanvasMouseUp}
-                onMouseLeave={handleCanvasMouseUp}
-                className="max-h-full max-w-full object-contain border-2 border-gray-600 rounded shadow cursor-crosshair"
-              />
-
-              {/* Bottom Image Info Badge */}
-              <div className="absolute bottom-2 left-2 bg-black/80 text-white px-2.5 py-1 rounded text-[11px] font-mono border border-gray-600">
-                Image: {currentFilename} | Assigned Label: <span className="text-yellow-300 font-bold">{selectedItemName || "NONE (SELECT ON RIGHT)"}</span>
+              {/* Thumbnail Strip */}
+              <div className="flex items-center space-x-2 overflow-x-auto px-2">
+                {imageQueue.map((item, idx) => (
+                  <button
+                    key={item.id}
+                    onClick={() => setCurrentImageIndex(idx)}
+                    className={`relative rounded border-2 overflow-hidden w-16 h-12 flex-shrink-0 transition-all ${
+                      idx === currentImageIndex ? 'border-[#0078D4] ring-2 ring-white scale-105' : 'border-gray-600 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={item.base64} alt={item.name} className="w-full h-full object-cover" />
+                    {item.regions.length > 0 && (
+                      <span className="absolute bottom-0 right-0 bg-[#107C10] text-white text-[9px] font-bold px-1 rounded-tl">
+                        {item.regions.length}
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
-            </div>
-          ) : (
-            <div className="text-center text-gray-400 p-8 space-y-3">
-              <ImageIcon className="w-16 h-16 mx-auto text-gray-600" />
-              <p className="text-sm font-semibold">No Component Image Loaded</p>
-              <p className="text-xs text-gray-500 max-w-md">
-                Click <strong>"Browse Component Image"</strong> above to select an image from your computer, or click <strong>"Camera Capture"</strong> to grab from the live conveyor.
-              </p>
+
+              <div className="text-[11px] text-gray-400 font-mono">
+                {currentImage?.name}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Right (40%): Label Selector, Training Folder Summary & Live Console */}
-        <div className="w-[440px] bg-white border-l border-[#D2D0CE] flex flex-col h-full overflow-hidden">
+        {/* Right: Label Studio Region Inspector & Training Folder Manager */}
+        <div className="w-[380px] bg-white border-l border-[#D2D0CE] flex flex-col h-full overflow-hidden flex-shrink-0">
           {/* Header */}
-          <div className="p-3 bg-gray-50 border-b border-gray-200">
-            <h3 className="font-bold text-gray-800 text-xs uppercase tracking-wider flex items-center space-x-1.5">
-              <Layers className="w-4 h-4 text-[#2B579A]" />
-              <span>Standard Excel BOM Label Selector</span>
-            </h3>
-            <p className="text-[11px] text-gray-500 mt-0.5">
-              Select the Item Name from the active BOM to act as the ground-truth YOLO26 label.
-            </p>
-          </div>
+          <div className="p-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-gray-800 text-xs uppercase tracking-wider flex items-center space-x-1.5">
+                <Layers className="w-4 h-4 text-[#2B579A]" />
+                <span>Regions & Annotations</span>
+              </h3>
+              <p className="text-[11px] text-gray-500">
+                {regions.length} box(es) drawn on current image
+              </p>
+            </div>
 
-          {/* Active Item Name Selector */}
-          <div className="p-3 border-b border-gray-200 bg-white space-y-2">
-            <label className="font-bold text-gray-700 block text-xs">
-              Item Name (YOLO Class Label):
-            </label>
-            <select
-              value={selectedItemName}
-              onChange={(e) => {
-                const name = e.target.value;
-                setSelectedItemName(name);
-                const matched = availableItems.find((it) => it.item_name === name);
-                setSelectedDrawingNo(matched ? matched.drawing_no : '');
-                // Update boxes on canvas
-                const updated = proposals.map((b) => ({ ...b, item_name: name, part_uid: matched?.drawing_no || name }));
-                setProposals(updated);
-                drawCanvas(updated);
-              }}
-              className="w-full p-2 border border-gray-300 rounded font-sans text-xs bg-gray-50 focus:bg-white font-medium text-gray-900 focus:outline-none focus:border-[#2B579A]"
-            >
-              <option value="">-- Choose BOM Component Label --</option>
-              {availableItems.map((it) => {
-                const sampleCount = datasetSummary?.parts_summary.find((p) => p.item_name === it.item_name)?.sample_count || 0;
-                return (
-                  <option key={it.item_name} value={it.item_name}>
-                    #{it.sr_no} | {it.item_name} {it.drawing_no !== '—' ? `[${it.drawing_no}]` : ''} ({sampleCount} in training folder)
-                  </option>
-                );
-              })}
-            </select>
-
-            {selectedItemName && (
-              <div className="bg-blue-50 border border-blue-200 p-2 rounded text-[11px] text-blue-900 flex justify-between items-center">
-                <div>
-                  <span className="font-semibold">Drawing No:</span> {selectedDrawingNo || '—'}<br />
-                  <span className="font-semibold">Target BOM Qty:</span> {availableItems.find((it) => it.item_name === selectedItemName)?.target_qty || 1} pcs
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] uppercase font-bold text-blue-700 block">Collected</span>
-                  <span className="text-sm font-extrabold font-mono text-[#107C10]">
-                    {datasetSummary?.parts_summary.find((p) => p.item_name === selectedItemName)?.sample_count || 0} images
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Middle: Training Folder Summary & Gallery */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="font-bold text-gray-800 text-xs">
-                Training Folder Dataset ({datasetSummary?.total_images || 0} images)
-              </span>
+            {selectedRegionId && (
               <button
-                onClick={loadData}
-                className="text-[11px] text-[#2B579A] hover:underline flex items-center space-x-1"
+                onClick={handleDeleteSelected}
+                className="p-1 text-red-600 hover:bg-red-50 rounded"
+                title="Delete Selected Box (Shortcut: Delete)"
               >
-                <RefreshCw className="w-3 h-3" />
-                <span>Refresh</span>
+                <Trash2 className="w-4 h-4" />
               </button>
-            </div>
-
-            {/* BOM Components Sample Progress Table */}
-            <div className="border border-gray-200 rounded overflow-hidden">
-              <table className="excel-grid-table">
-                <thead>
-                  <tr>
-                    <th>Item Name (Label)</th>
-                    <th className="w-16 text-center">Images</th>
-                    <th className="w-16 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(datasetSummary?.parts_summary || []).map((p) => (
-                    <tr
-                      key={p.item_name}
-                      onClick={() => {
-                        setSelectedItemName(p.item_name);
-                        setSelectedDrawingNo(p.drawing_no);
-                      }}
-                      className={`cursor-pointer ${p.item_name === selectedItemName ? 'bg-cyan-50 font-semibold' : 'hover:bg-gray-50'}`}
-                    >
-                      <td className="truncate max-w-[200px]" title={p.item_name}>
-                        {p.item_name}
-                      </td>
-                      <td className="text-center font-mono font-bold">
-                        {p.sample_count}
-                      </td>
-                      <td className="text-center">
-                        <span
-                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                            p.sample_count > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-                          }`}
-                        >
-                          {p.sample_count > 0 ? 'READY' : 'EMPTY'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Recent Stored Images in Training Folder */}
-            <div className="space-y-1.5 pt-1">
-              <span className="font-semibold text-gray-700 text-[11px] block">
-                Recently Saved Images:
-              </span>
-              <div className="space-y-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-1 bg-gray-50">
-                {(datasetSummary?.samples || []).map((s) => (
-                  <div
-                    key={s.filename}
-                    className="flex items-center justify-between p-1.5 bg-white border border-gray-200 rounded text-[11px]"
-                  >
-                    <div className="truncate max-w-[280px]">
-                      <span className="font-mono text-gray-500 text-[10px] block truncate">{s.filename}</span>
-                      <strong className="text-[#107C10] font-sans truncate block">{s.primary_label}</strong>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteSample(s.stem)}
-                      className="text-gray-400 hover:text-red-600 p-1"
-                      title="Delete from training folder"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-                {(!datasetSummary?.samples || datasetSummary.samples.length === 0) && (
-                  <div className="text-center py-4 text-gray-400 italic text-[11px]">
-                    No images saved yet. Browse an image and click "Add to Training Folder".
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
           </div>
 
-          {/* Bottom: Live Training Progress & Terminal Logs */}
-          <div className="border-t border-gray-300 bg-gray-900 text-gray-200 p-3 space-y-2">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center space-x-1.5">
-                <Cpu className="w-4 h-4 text-yellow-300" />
-                <span className="font-bold text-xs uppercase text-white">
-                  YOLO26 Training Engine:
-                </span>
-                <span
-                  className={`font-mono font-bold text-[11px] px-1.5 py-0.2 rounded ${
-                    isTraining
-                      ? 'bg-amber-600 text-white animate-pulse'
-                      : isCompleted
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300'
-                  }`}
-                >
-                  {trainingStatus?.status || 'IDLE'}
-                </span>
+          {/* Region List (Label Studio Region Sidebar) */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 border-b border-gray-200">
+            {regions.length === 0 ? (
+              <div className="p-6 text-center text-gray-400">
+                <Crosshair className="w-8 h-8 mx-auto text-gray-300 mb-2" />
+                <p className="font-semibold text-xs">No boxes drawn yet</p>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Click and drag on the image to outline a component, or click <strong>Auto Box</strong>.
+                </p>
               </div>
-              <span className="font-mono text-[11px] text-gray-300">
-                Epoch: <strong>{trainingStatus?.current_epoch || 0} / {trainingStatus?.total_epochs || 50}</strong>
+            ) : (
+              regions.map((reg, idx) => {
+                const isSelected = reg.id === selectedRegionId;
+                return (
+                  <div
+                    key={reg.id}
+                    onClick={() => setSelectedRegionId(reg.id)}
+                    style={{ borderLeftColor: reg.color }}
+                    className={`p-2 rounded border border-l-4 transition-all cursor-pointer flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-blue-50/80 border-blue-400 shadow-sm'
+                        : 'bg-white hover:bg-gray-50 border-gray-200'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 flex-1 min-w-0 pr-2">
+                      <span
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: reg.color }}
+                      />
+                      <div className="min-w-0">
+                        <span className="font-bold text-xs text-gray-900 block truncate">
+                          #{idx + 1} {reg.item_name}
+                        </span>
+                        <span className="text-[10px] text-gray-500 font-mono">
+                          {Math.round(reg.width * 100)}% × {Math.round(reg.height * 100)}% {reg.angle ? `(${reg.angle}°)` : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRegions((prev) =>
+                            prev.map((r) => (r.id === reg.id ? { ...r, is_visible: !r.is_visible } : r))
+                          );
+                        }}
+                        className="p-1 text-gray-400 hover:text-gray-700"
+                        title={reg.is_visible ? 'Hide Box' : 'Show Box'}
+                      >
+                        {reg.is_visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5 text-gray-400" />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRegions((prev) => prev.filter((r) => r.id !== reg.id));
+                          if (selectedRegionId === reg.id) setSelectedRegionId(null);
+                        }}
+                        className="p-1 text-gray-400 hover:text-red-600"
+                        title="Delete this box"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Dataset Status & Training Folder Breakdown */}
+          <div className="p-3 bg-gray-50 border-t border-gray-200 flex-shrink-0">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="font-bold text-xs uppercase text-gray-700">Dataset Status</span>
+              <span className="text-xs font-mono font-bold text-[#107C10]">
+                {datasetSummary?.total_images || 0} images in dataset
               </span>
             </div>
 
-            {/* Progress bar */}
-            <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
-              <div
-                className="bg-green-500 h-full transition-all duration-300"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
-
-            {/* Live Terminal Console Logs */}
-            <div
-              ref={logsContainerRef}
-              className="bg-black/90 rounded border border-gray-700 p-2 h-28 overflow-y-auto font-mono text-[10px] text-green-400 leading-tight space-y-0.5"
-            >
-              {(trainingStatus?.logs && trainingStatus.logs.length > 0) ? (
-                trainingStatus.logs.map((line, idx) => (
-                  <div key={idx} className="whitespace-pre-wrap">{line}</div>
-                ))
-              ) : (
-                <div className="text-gray-500 italic">
-                  Training logs console ready. Click "Start YOLO26 Model Training" above to begin.
-                </div>
-              )}
-            </div>
-
-            {/* Completion Banner */}
-            {isCompleted && (
-              <div className="bg-green-900/80 border border-green-500 text-white p-2 rounded text-[11px] flex items-center justify-between">
-                <span className="flex items-center space-x-1 font-bold">
-                  <CheckCircle2 className="w-4 h-4 text-green-400" />
-                  <span>Training finished! Active weights: {trainingStatus?.active_weights}</span>
-                </span>
+            {/* Quick Instruction Banner */}
+            <div className="bg-white p-2 rounded border border-gray-300 text-[11px] text-gray-600 space-y-1">
+              <div className="flex items-center space-x-1 font-semibold text-gray-800">
+                <HelpCircle className="w-3.5 h-3.5 text-[#2B579A]" />
+                <span>Label Studio Shortcuts:</span>
               </div>
-            )}
+              <p>• <strong>R</strong>: Box tool | <strong>V</strong>: Select tool</p>
+              <p>• <strong>1–9</strong>: Quick select BOM label</p>
+              <p>• <strong>Delete</strong>: Remove selected box</p>
+              <p>• <strong>Ctrl + Enter</strong>: Save & Next Image</p>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* 4. BOTTOM TRAINING CONSOLE DRAWER (Shows when training is active) */}
+      {showTrainingPanel && (
+        <div className="h-56 bg-[#1E1E1E] border-t-2 border-[#2B579A] text-white flex flex-col flex-shrink-0 shadow-2xl">
+          <div className="bg-[#252526] px-4 py-1.5 flex items-center justify-between border-b border-gray-700">
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
+                <Cpu className={`w-4 h-4 ${isTraining ? 'text-amber-400 animate-spin' : 'text-green-400'}`} />
+                <span className="font-bold uppercase tracking-wider text-xs">
+                  YOLO26-OBB Training Progress: {trainingStatus?.status || 'IDLE'}
+                </span>
+              </div>
+              {trainingStatus && trainingStatus.total_epochs > 0 && (
+                <span className="text-xs font-mono text-yellow-300">
+                  Epoch {trainingStatus.current_epoch} / {trainingStatus.total_epochs} ({Math.round(progressPct)}%)
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowTrainingPanel(false)}
+              className="text-gray-400 hover:text-white text-xs px-2 py-0.5"
+            >
+              Minimize ✕
+            </button>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="w-full bg-gray-800 h-1.5">
+            <div
+              className={`h-full transition-all duration-300 ${
+                trainingStatus?.status === 'COMPLETED' ? 'bg-green-500' : 'bg-[#0078D4]'
+              }`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+
+          {/* Live Console Output */}
+          <div
+            ref={logsContainerRef}
+            className="flex-1 p-3 font-mono text-[11px] overflow-y-auto space-y-1 text-gray-300 select-text"
+          >
+            {trainingStatus?.logs && trainingStatus.logs.length > 0 ? (
+              trainingStatus.logs.map((line, i) => (
+                <div key={i} className="leading-tight">
+                  {line}
+                </div>
+              ))
+            ) : (
+              <div className="text-gray-500 italic">Waiting for training logs...</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

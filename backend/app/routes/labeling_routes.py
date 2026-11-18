@@ -31,10 +31,11 @@ class SaveAnnotationsRequest(BaseModel):
 
 class SaveComponentRequest(BaseModel):
     image_base64: str
-    item_name: str
+    item_name: Optional[str] = None
     drawing_no: Optional[str] = None
     polygon: Optional[List[List[float]]] = None
     master_item_code: Optional[str] = None
+    regions: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/upload-image")
 async def upload_image_file(file: UploadFile = File(...)):
@@ -81,22 +82,35 @@ async def save_component(payload: SaveComponentRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to decode base64 image: {e}")
 
-    annotation = {
-        "item_name": payload.item_name,
-        "part_uid": payload.drawing_no if payload.drawing_no and payload.drawing_no != "—" else payload.item_name,
-        "polygon": payload.polygon or [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]],
-        "is_browse_upload": True
-    }
+    annotations = []
+    if payload.regions and len(payload.regions) > 0:
+        for r in payload.regions:
+            annotations.append({
+                "item_name": r.get("item_name") or payload.item_name,
+                "part_uid": r.get("part_uid") or r.get("drawing_no") or payload.drawing_no or r.get("item_name"),
+                "polygon": r.get("polygon"),
+                "is_browse_upload": True
+            })
+    elif payload.item_name:
+        annotation = {
+            "item_name": payload.item_name,
+            "part_uid": payload.drawing_no if payload.drawing_no and payload.drawing_no != "—" else payload.item_name,
+            "polygon": payload.polygon or [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]],
+            "is_browse_upload": True
+        }
+        annotations.append(annotation)
+    else:
+        raise HTTPException(status_code=400, detail="Missing item_name or regions in save request.")
 
     result = auto_labeler.save_labeled_frame(
         image=image,
-        annotations=[annotation],
+        annotations=annotations,
         master_item_code=payload.master_item_code
     )
 
     return {
         "status": "SAVED",
-        "item_name": payload.item_name,
+        "regions_saved": len(annotations),
         "result": result
     }
 
